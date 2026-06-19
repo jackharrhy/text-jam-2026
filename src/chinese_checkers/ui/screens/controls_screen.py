@@ -28,8 +28,8 @@ CONTROLS_MARKDOWN = r"""
 ```
 """
 
-class ControlsScreen(Screen):
 
+class ControlsScreen(Screen):
     DEFAULT_CSS = """
     #controls_container {
     width: 60;
@@ -54,8 +54,6 @@ class ControlsScreen(Screen):
                 with VerticalScroll():
                     yield markdown
                 yield Button("Back", id="back")
-            
-
 
     def on_mount(self):
 
@@ -63,9 +61,7 @@ class ControlsScreen(Screen):
 
         controls_container.border_title = "[bold yellow]Controls[/]"
 
-
     def on_button_pressed(self, event: Button.Pressed):
 
         if event.button.id == "back":
-            
             self.app.pop_screen()

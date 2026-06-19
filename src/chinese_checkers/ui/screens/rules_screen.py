@@ -45,7 +45,6 @@ RULES_MARKDOWN = r"""
 
 
 class RulesScreen(Screen):
-
     DEFAULT_CSS = """
     #rules_container {
     width: 75%;
@@ -74,8 +73,6 @@ class RulesScreen(Screen):
                 with VerticalScroll():
                     yield markdown
                 yield Button("Back", id="back")
-            
-
 
     def on_mount(self):
 
@@ -83,9 +80,7 @@ class RulesScreen(Screen):
 
         rules_container.border_title = "[bold yellow]Rules[/]"
 
-
     def on_button_pressed(self, event: Button.Pressed):
 
         if event.button.id == "back":
-            
             self.app.pop_screen()

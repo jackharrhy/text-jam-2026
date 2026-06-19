@@ -1,4 +1,4 @@
-PUBLIC_SERVER_HOST = "chinesecheckers.webhop.me" # Networked testing
+PUBLIC_SERVER_HOST = "chinesecheckers.webhop.me"  # Networked testing
 # PUBLIC_SERVER_HOST = "127.0.0.1"    # Local testing
 LISTEN_HOST = "0.0.0.0"
 SERVER_PORT = 5555

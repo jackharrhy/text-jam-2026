@@ -6,13 +6,10 @@ from textual.containers import Vertical, CenterMiddle, Horizontal
 from chinese_checkers.client.local_identity import save_identity
 from chinese_checkers.ui.screens.lobby_screen import LobbyScreen
 from chinese_checkers.shared.settings import PUBLIC_SERVER_HOST, SERVER_PORT
-from chinese_checkers.shared.message_types import (
-    SESSION_VALIDATED,
-    INVALID_SESSION
-)
+from chinese_checkers.shared.message_types import SESSION_VALIDATED, INVALID_SESSION
+
 
 class JoinSessionScreen(Screen):
-
     DEFAULT_CSS = """
     #join_session_container {
     width: 50;
@@ -37,9 +34,8 @@ class JoinSessionScreen(Screen):
 
         self.message_handlers = {
             SESSION_VALIDATED: self._handle_session_validated,
-            INVALID_SESSION: self._handle_invalid_session
+            INVALID_SESSION: self._handle_invalid_session,
         }
-
 
     def compose(self) -> ComposeResult:
 
@@ -51,8 +47,6 @@ class JoinSessionScreen(Screen):
                 with Horizontal():
                     yield Button("Back", id="back")
                     yield Button("Join", id="join_session")
-            
-
 
     def on_mount(self):
 
@@ -66,24 +60,16 @@ class JoinSessionScreen(Screen):
 
     def handle_message(self, data):
 
-        handler = self.message_handlers.get(
-            data["type"]
-        )
+        handler = self.message_handlers.get(data["type"])
 
         if handler:
             handler(data)
 
-
     def _handle_session_validated(self, data):
 
         self.app.call_from_thread(
-            self.app.push_screen,
-            LobbyScreen(
-                self.app.client,
-                self.app.client.identity
-            )
+            self.app.push_screen, LobbyScreen(self.app.client, self.app.client.identity)
         )
-
 
     def _handle_invalid_session(self, data):
 
@@ -94,50 +80,32 @@ class JoinSessionScreen(Screen):
         save_identity(identity)
 
         self.app.call_from_thread(
-            self.notify,
-            "Session ID does not exist.",
-            severity="error"
+            self.notify, "Session ID does not exist.", severity="error"
         )
-
 
     def on_button_pressed(self, event: Button.Pressed):
 
         if event.button.id == "join_session":
-            
-            session_input = self.query_one(
-                "#session_id",
-                Input
-            )
+            session_input = self.query_one("#session_id", Input)
 
             session_id = session_input.value.strip().upper()
 
             if not session_id:
                 return
-            
+
             client = self.app.client
 
             identity = client.identity
 
             try:
-
                 client.connect_to_session(
-                    PUBLIC_SERVER_HOST,
-                    SERVER_PORT,
-                    identity,
-                    session_id=session_id
+                    PUBLIC_SERVER_HOST, SERVER_PORT, identity, session_id=session_id
                 )
 
             except ConnectionRefusedError:
-
-                self.notify(
-                    "Cannot connect to server.",
-                    severity="error"
-                )
+                self.notify("Cannot connect to server.", severity="error")
 
                 return
 
         elif event.button.id == "back":
-
             self.app.pop_screen()
-
-
