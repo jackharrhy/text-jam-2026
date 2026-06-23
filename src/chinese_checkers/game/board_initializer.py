@@ -1,5 +1,6 @@
 from chinese_checkers.ui.board_layout import VALID_COORDS, HOME_ZONES
 
+
 def create_initial_board(players):
 
     board = {}
@@ -8,7 +9,6 @@ def create_initial_board(players):
         board[coord] = None
 
     for config in players:
-
         player_number = config["player"]
         start_zone = config["start"]
 

@@ -3,6 +3,7 @@ from pathlib import Path
 
 IDENTIFY_FILE = Path.home() / ".chinese_checkers_identity.json"
 
+
 def load_identity():
 
     if not IDENTIFY_FILE.exists():

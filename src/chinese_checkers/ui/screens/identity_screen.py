@@ -7,8 +7,8 @@ import uuid
 
 from chinese_checkers.client.local_identity import save_identity
 
-class IdentityScreen(Screen):
 
+class IdentityScreen(Screen):
     DEFAULT_CSS = """
     #username_container {
     width: 30;
@@ -32,8 +32,6 @@ class IdentityScreen(Screen):
             with Vertical(id="username_container"):
                 yield self.name_input
                 yield Button("Continue", id="continue")
-            
-
 
     def on_mount(self):
 
@@ -43,12 +41,11 @@ class IdentityScreen(Screen):
 
         self.name_input.focus()
 
-
     def on_button_pressed(self, event: Button.Pressed):
 
         if event.button.id != "continue":
             return
-        
+
         name_input = self.query_one("#name", Input)
 
         entered_name = name_input.value.strip()
@@ -59,7 +56,7 @@ class IdentityScreen(Screen):
         identity = {
             "player_id": str(uuid.uuid4()),
             "session_id": None,
-            "name": entered_name
+            "name": entered_name,
         }
 
         save_identity(identity)

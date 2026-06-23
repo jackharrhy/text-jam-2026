@@ -14,6 +14,7 @@ build_env/
 testpypi_env/
 fresh_env/
 prod_test/
+.venv/
 
 # Secrets
 .env

@@ -10,7 +10,7 @@ from chinese_checkers.shared.settings import (
     LISTEN_HOST,
     SERVER_PORT,
     PROTOCOL_VERSION,
-    HEARTBEAT_INTERVAL
+    HEARTBEAT_INTERVAL,
 )
 from chinese_checkers.shared.messages import (
     make_welcome,
@@ -18,36 +18,32 @@ from chinese_checkers.shared.messages import (
     make_invalid_session,
     make_session_validated,
     make_duplicate_player,
-    make_server_heartbeat
+    make_server_heartbeat,
 )
 from chinese_checkers.shared.message_types import (
     CONNECT,
     DEBUG,
     LEAVE_LOBBY,
-    LEAVE_GAME
+    LEAVE_GAME,
 )
 
 manager = SessionManager()
+
 
 def handle_connection(manager, conn):
 
     buffer = ""
 
     try:
-
         data, buffer = receive_json(conn, buffer)
 
     except ValueError as e:
-
         print(f"Rejected connection: {e}")
 
         conn.close()
 
         return
-    except (
-        ConnectionResetError,
-        OSError
-    ):
+    except (ConnectionResetError, OSError):
         conn.close()
 
     if data is None:
@@ -57,17 +53,11 @@ def handle_connection(manager, conn):
     if data.get("type") != CONNECT:
         conn.close()
         return
-    
+
     client_version = data.get("protocol_version")
 
     if client_version != PROTOCOL_VERSION:
-
-        send_json(
-            conn,
-            make_error(
-                "Client version mismatch."
-            )
-        )
+        send_json(conn, make_error("Client version mismatch."))
 
         conn.close()
         return
@@ -78,7 +68,6 @@ def handle_connection(manager, conn):
 
     # Identity file has session id
     if session_id:
-
         session = manager.get_session(session_id)
 
         # Session ID belongs to expired / invalid session.
@@ -86,7 +75,6 @@ def handle_connection(manager, conn):
             send_json(conn, make_invalid_session())
             conn.close()
             return
-
 
         session_players = session.get_connected_players()
 
@@ -100,17 +88,14 @@ def handle_connection(manager, conn):
         player_num = session.get_player_num(player_id)
         send_json(conn, make_session_validated(session, player_num))
 
-
     # Player created a new session
     if session is None:
         num_players = data.get("num_players", 2)
         session = manager.create_session(num_players)
         session_id = session.session_id
 
-
     # Reconnect player to valid session
     if player_id in session.players:
-
         player = session.players[player_id]
         player.attach_connection(conn)
 
@@ -118,12 +103,13 @@ def handle_connection(manager, conn):
         session.touch()
 
         session.handle_reconnect(player)
-        print(f"\nPlayer id {player_id} reconnected to Session id: {session.session_id}")
-
+        print(
+            f"\nPlayer id {player_id} reconnected to Session id: {session.session_id}"
+        )
 
     # New player connecting to session
     else:
-        player = Player( player_id, data["name"], session.session_id)
+        player = Player(player_id, data["name"], session.session_id)
         player.attach_connection(conn)
         player.last_seen = time.time()
         session.add_player(player)
@@ -136,25 +122,21 @@ def handle_connection(manager, conn):
     # Receive message loop
     while True:
         try:
-
             data, buffer = receive_json(conn, buffer)
 
             if data is None:
                 break
 
             if data["type"] == DEBUG:
-                
                 print("DEBUG: ", data["message"])
-                
+
                 continue
 
             if data["type"] == LEAVE_LOBBY:
-
                 player_exit_type = "lobby"
                 break
 
             if data["type"] == LEAVE_GAME:
-
                 player_exit_type = "game"
                 break
 
@@ -176,7 +158,7 @@ def handle_connection(manager, conn):
     elif player_exit_type == "game":
         print(f"Server.py: Player {player.player_id} left the game")
         session.handle_leave_game(player)
-    
+
     else:
         session.handle_disconnect(player)
         print(f"Server.py: Player {player.player_id} disconnected")
@@ -191,15 +173,9 @@ def start_server():
     server.bind((LISTEN_HOST, SERVER_PORT))
     server.listen()
 
-    cleanup_thread = threading.Thread(
-        target=cleanup_loop,
-        daemon=True
-    )
+    cleanup_thread = threading.Thread(target=cleanup_loop, daemon=True)
 
-    heartbeat_thread = threading.Thread(
-        target=heartbeat_loop,
-        daemon=True
-    )
+    heartbeat_thread = threading.Thread(target=heartbeat_loop, daemon=True)
 
     heartbeat_thread.start()
 
@@ -208,26 +184,19 @@ def start_server():
     print("Server.py: Server started")
 
     try:
-
         while True:
-
             conn, addr = server.accept()
 
             print(f"Server.py: New connection: {addr}")
 
-            thread = threading.Thread(
-                target=handle_connection,
-                args=(manager, conn)
-            )
+            thread = threading.Thread(target=handle_connection, args=(manager, conn))
 
             thread.start()
 
     except KeyboardInterrupt:
-
         print("\nShutting down server...")
 
     finally:
-
         server.close()
 
         print("server closed.")
@@ -236,7 +205,6 @@ def start_server():
 def heartbeat_loop():
 
     while True:
-
         time.sleep(HEARTBEAT_INTERVAL)
 
         with manager.lock:
@@ -244,15 +212,13 @@ def heartbeat_loop():
 
         for session in sessions:
             for player in session.players.values():
-
-                if (player.connected and player.connection):
+                if player.connected and player.connection:
                     safe_send_json(player, make_server_heartbeat())
 
 
 def cleanup_loop():
 
     while True:
-
         manager.cleanup_sessions()
 
         time.sleep(10)
