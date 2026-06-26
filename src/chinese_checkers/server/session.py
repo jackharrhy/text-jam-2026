@@ -1,6 +1,10 @@
+import random
 import threading
 import time
+import uuid
+from pathlib import Path
 
+from chinese_checkers.game.cpu_brain import generate_move
 from chinese_checkers.game.game_state import GameState
 from chinese_checkers.game.move_validator import validate_move, validate_partial_move
 from chinese_checkers.game.player import Player
@@ -32,11 +36,17 @@ from chinese_checkers.shared.network import safe_send_message, send_message
 
 RECONNECT_TIMEOUT = 300  # Clean up session after five minutes of inactivity.
 
+CPU_NAMES = (
+    Path(__file__).parents[1] / "game" / "cpu_names.txt"
+).read_text().strip().splitlines()
+
+
 class Session:
-    def __init__(self, session_id, num_players):
+    def __init__(self, session_id, num_players, cpu_count=0):
         self.session_id = session_id
 
         self.lobby_num_players = num_players
+        self.cpu_count = cpu_count
         self.game_num_players = None
 
         self.players: dict = {}
@@ -126,6 +136,7 @@ class Session:
                 player_number=player.player_number,
                 connected=player.connected,
                 is_host=player.player_id == self.host_player_id,
+                is_cpu=player.is_cpu,
             )
             for player in self.players.values()
         ]
@@ -181,7 +192,10 @@ class Session:
 
     def all_players_connected(self):
 
-        return all(player.connected for player in self.players.values())
+        return all(
+            player.connected or player.is_cpu
+            for player in self.players.values()
+        )
 
     def touch(self):
 
@@ -234,6 +248,23 @@ class Session:
 
     def start_game(self):
 
+        # Fill remaining slots with CPU players
+        human_count = len(self.players)
+        cpu_needed = min(
+            self.cpu_count,
+            self.lobby_num_players - human_count,
+        )
+        for i in range(cpu_needed):
+            cpu_name = random.choice(CPU_NAMES)
+            cpu_player = Player(
+                player_id=str(uuid.uuid4()),
+                name=f"{cpu_name} [CPU]",
+                session_id=self.session_id,
+                is_cpu=True,
+            )
+            cpu_player.connected = True
+            self.players[cpu_player.player_id] = cpu_player
+
         self.game_num_players = len(self.players)
 
         self.assign_player_numbers()
@@ -246,7 +277,7 @@ class Session:
 
         for player in self.players.values():
             print(f"Player {player.name} has number {player.player_number}")
-            if player.connected:
+            if player.connected and not player.is_cpu:
                 safe_send_message(player, GameStartedMessage.for_player(self, player))
 
                 for msg in self.chat_history:
@@ -321,10 +352,12 @@ class Session:
             return
 
         if (
-            len(self.players) != self.lobby_num_players
+            len(self.players) + msg.cpu_count != self.lobby_num_players
             or not self.all_players_connected()
         ):
             return
+
+        self.cpu_count = msg.cpu_count
 
         self.start_game()
 
@@ -437,4 +470,52 @@ class Session:
 
         self.broadcast_session_state()
 
+        self.process_cpu_turns()
+
         return None
+
+
+    def process_cpu_turns(self):
+
+        if self.state != IN_PROGRESS or self.game_state is None:
+            return
+
+        while True:
+            current_player = self.game_state.current_player_number
+
+            cpu_player = next(
+                (
+                    p
+                    for p in self.players.values()
+                    if p.player_number == current_player
+                ),
+                None,
+            )
+
+            if not cpu_player or not cpu_player.is_cpu:
+                break
+
+            time.sleep(0.6)
+
+            with self.lock:
+                if self.game_state.winner is not None:
+                    break
+
+                move = generate_move(
+                    self.game_state.board,
+                    self.game_state.players,
+                    current_player,
+                )
+
+                if move is None:
+                    print(
+                        f"CPU {current_player} has no legal moves — skipping"
+                    )
+                    self.game_state.next_turn()
+                    continue
+
+                self.game_state.apply_move(move[0], move[-1])
+
+            self.touch()
+
+            self.broadcast_session_state()

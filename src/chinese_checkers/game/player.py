@@ -2,7 +2,7 @@ import time
 
 
 class Player:
-    def __init__(self, player_id, name, session_id, player_number=None):
+    def __init__(self, player_id, name, session_id, player_number=None, is_cpu=False):
 
         self.player_id = player_id
         self.name = name
@@ -12,6 +12,8 @@ class Player:
         self.connection = None
 
         self.connected = False
+
+        self.is_cpu = is_cpu
 
         self.last_seen = time.time()
 

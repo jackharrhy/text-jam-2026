@@ -21,6 +21,7 @@ class LobbyPlayer(BaseModel):
     player_number: int | None = None
     connected: bool
     is_host: bool
+    is_cpu: bool = False
 
 
 class Identity(BaseModel):
@@ -234,6 +235,7 @@ class ValidatePartialMessage(BaseModel):
 
 class StartGameMessage(BaseModel):
     type: Literal["start_game"] = "start_game"
+    cpu_count: int = 0
 
 
 class UpdateNumPlayersMessage(BaseModel):
