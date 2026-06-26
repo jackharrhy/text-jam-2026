@@ -1,26 +1,27 @@
-from textual.screen import Screen
 from textual.app import ComposeResult
+from textual.containers import CenterMiddle, Vertical
+from textual.screen import Screen
 from textual.widgets import Button
-from textual.containers import Vertical, CenterMiddle
 
-from chinese_checkers.ui.screens.game_screen import GameScreen
-from chinese_checkers.ui.screens.lobby_screen import LobbyScreen
-from chinese_checkers.ui.screens.identity_screen import IdentityScreen
-from chinese_checkers.ui.screens.rules_screen import RulesScreen
-from chinese_checkers.ui.screens.controls_screen import ControlsScreen
-from chinese_checkers.ui.screens.join_session_screen import JoinSessionScreen
 from chinese_checkers.client.local_identity import (
-    save_identity,
-    load_identity,
     clear_identity,
+    load_identity,
+    save_identity,
 )
-from chinese_checkers.shared.message_types import (
-    ERROR,
-    SESSION_VALIDATED,
-    INVALID_SESSION,
-    DUPLICATE_PLAYER,
+from chinese_checkers.shared.models import (
+    DuplicatePlayerMessage,
+    ErrorMessage,
+    InvalidSessionMessage,
+    ServerMessage,
+    SessionValidatedMessage,
 )
 from chinese_checkers.shared.settings import PUBLIC_SERVER_HOST, SERVER_PORT
+from chinese_checkers.ui.screens.controls_screen import ControlsScreen
+from chinese_checkers.ui.screens.game_screen import GameScreen
+from chinese_checkers.ui.screens.identity_screen import IdentityScreen
+from chinese_checkers.ui.screens.join_session_screen import JoinSessionScreen
+from chinese_checkers.ui.screens.lobby_screen import LobbyScreen
+from chinese_checkers.ui.screens.rules_screen import RulesScreen
 
 
 class MainMenuScreen(Screen):
@@ -46,16 +47,14 @@ class MainMenuScreen(Screen):
     }
     """
 
+    @property
+    def _client(self):
+        return self.app.client  # ty: ignore[unresolved-attribute]
+
     def __init__(self):
         super().__init__()
 
-        self.app.client.on_message = self.handle_message
-
-        self.message_handlers = {
-            SESSION_VALIDATED: self._handle_session_validated,
-            INVALID_SESSION: self._handle_invalid_session,
-            DUPLICATE_PLAYER: self._handle_duplicate_player,
-        }
+        self._client.on_message = self.handle_message
 
     def compose(self) -> ComposeResult:
 
@@ -75,20 +74,20 @@ class MainMenuScreen(Screen):
 
         menu_container.border_title = "[bold yellow]Chinese Checkers[/]"
 
-        self.app.client.on_message = self.handle_message
+        self._client.on_message = self.handle_message
 
         identity = load_identity()
 
         if identity:
-            self.app.client.identity = identity
+            self._client.identity = identity
 
-            if identity["session_id"] is not None:
+            if identity.session_id is not None:
                 try:
-                    self.app.client.connect_to_session(
+                    self._client.connect_to_session(
                         PUBLIC_SERVER_HOST,
                         SERVER_PORT,
                         identity,
-                        session_id=identity["session_id"],
+                        session_id=identity.session_id,
                     )
 
                 except Exception:
@@ -96,44 +95,46 @@ class MainMenuScreen(Screen):
         else:
             self.app.push_screen(IdentityScreen())
 
-    def handle_message(self, data):
-        if data["type"] == ERROR:
-            print(data["message"])
+    def handle_message(self, msg: ServerMessage):
+        if isinstance(msg, ErrorMessage):
+            print(msg.message)
 
-        handler = self.message_handlers.get(data["type"])
+        if isinstance(msg, SessionValidatedMessage):
+            self._handle_session_validated(msg)
+        elif isinstance(msg, InvalidSessionMessage):
+            self._handle_invalid_session(msg)
+        elif isinstance(msg, DuplicatePlayerMessage):
+            self._handle_duplicate_player(msg)
 
-        if handler:
-            handler(data)
-
-    def _handle_duplicate_player(self, data):
+    def _handle_duplicate_player(self, _msg):
 
         clear_identity()
 
         self.app.call_from_thread(self.app.push_screen, IdentityScreen())
 
-    def _handle_invalid_session(self, data):
-        identity = self.app.client.identity
-        identity["session_id"] = None
+    def _handle_invalid_session(self, _msg):
+        identity = self._client.identity
+        identity.session_id = None
         save_identity(identity)
 
-    def _handle_session_validated(self, data):
-        state = data["session_state"]
+    def _handle_session_validated(self, msg: SessionValidatedMessage):
+        state = msg.session_state
 
-        player_num = data["player_num"]
-        player_configs = data["player_configs"]
+        player_num = msg.player_num
+        player_configs = msg.player_configs
 
         if state == "lobby":
             self.app.call_from_thread(
                 self.app.push_screen,
-                LobbyScreen(self.app.client, self.app.client.identity),
+                LobbyScreen(self._client, self._client.identity),
             )
 
         elif state == "in_progress":
             self.app.call_from_thread(
                 self.app.push_screen,
                 GameScreen(
-                    self.app.client,
-                    self.app.client.identity,
+                    self._client,
+                    self._client.identity,
                     player_num,
                     player_configs,
                 ),
@@ -150,7 +151,7 @@ class MainMenuScreen(Screen):
             self.create_session(2)
 
         elif button_id == "join":
-            identity = self.app.client.identity
+            identity = self._client.identity
 
             if not identity:
                 self.app.push_screen(IdentityScreen())
@@ -161,7 +162,7 @@ class MainMenuScreen(Screen):
         elif button_id == "change_username":
             clear_identity()
 
-            self.app.client.identity = None
+            self._client.identity = None
 
             self.app.push_screen(IdentityScreen())
 
@@ -173,7 +174,7 @@ class MainMenuScreen(Screen):
 
     def create_session(self, num_players):
 
-        client = self.app.client
+        client = self._client
         identity = client.identity
 
         if not identity:

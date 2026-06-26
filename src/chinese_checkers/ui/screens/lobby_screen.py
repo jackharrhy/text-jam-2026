@@ -1,21 +1,28 @@
-from textual.screen import Screen
 from textual.app import ComposeResult
-from textual.widgets import Static, Button, Select, RichLog, Input
-from textual.containers import Vertical, Horizontal, CenterMiddle
+from textual.containers import CenterMiddle, Horizontal, Vertical
+from textual.screen import Screen
+from textual.widgets import Button, Input, RichLog, Select, Static
+
 
 from chinese_checkers.client.local_identity import save_identity
-from chinese_checkers.ui.screens.game_screen import GameScreen
-from chinese_checkers.shared.message_types import (
-    WELCOME,
-    LOBBY_STATE,
-    GAME_STARTED,
-    START_GAME,
-    UPDATE_NUM_PLAYERS,
-    LEAVE_LOBBY,
-    KICK_PLAYER,
-    KICKED_FROM_LOBBY,
-    CHAT,
+from chinese_checkers.shared.models import (
+    ClientChatMessage,
+    DebugMessage,
+    GameStartedMessage,
+    Identity,
+    KickedFromLobbyMessage,
+    KickPlayerMessage,
+    LeaveLobbyMessage,
+    LobbyPlayer,
+    LobbyStateMessage,
+    PlayerConfig,
+    ServerChatMessage,
+    ServerMessage,
+    StartGameMessage,
+    UpdateNumPlayersMessage,
+    WelcomeMessage,
 )
+from chinese_checkers.ui.screens.game_screen import GameScreen
 
 
 class LobbyScreen(Screen):
@@ -48,27 +55,19 @@ class LobbyScreen(Screen):
         super().__init__()
 
         self.client = client
-        self.identity = identity
+        self.identity = Identity(**identity) if isinstance(identity, dict) else identity
 
         self.player_number = None
         self.is_host = False
 
         self.session_id = None
-        self.players = []
+        self.players: list[LobbyPlayer] = []
         self.num_players = None
-        self.player_configs = None
+        self.player_configs: list[PlayerConfig] | None = None
 
         self.client.on_message = self.handle_message
         self.client.on_disconnect = self.handle_disconnect
         self.client.log_message = self.log_message
-
-        self.message_handlers = {
-            WELCOME: self._handle_welcome,
-            GAME_STARTED: self._handle_game_started,
-            LOBBY_STATE: self._handle_lobby_state,
-            KICKED_FROM_LOBBY: self._handle_kicked_from_lobby,
-            CHAT: self._handle_chat,
-        }
 
     def compose(self) -> ComposeResult:
 
@@ -126,17 +125,16 @@ class LobbyScreen(Screen):
 
     def refresh_lobby(self):
 
-        self.session_id_widget.update(f"Session ID: [bold]{self.session_id}[/]")
+        if self.num_players is None:
+            return
 
-        if self.num_players is not None:
-            self.player_count_select.value = self.num_players
+        self.session_id_widget.update(f"Session ID: [bold]{self.session_id}[/]")
 
         self.call_after_refresh(self.rebuild_player_list)
 
-        # Update status
-        connected_players = sum(1 for player in self.players if player["connected"])
+        connected_players = sum(1 for player in self.players if player.connected)
 
-        all_connected = all(player["connected"] for player in self.players)
+        all_connected = all(player.connected for player in self.players)
 
         if connected_players == self.num_players and all_connected:
             if self.is_host:
@@ -147,15 +145,18 @@ class LobbyScreen(Screen):
             status_message = "[bold yellow]Waiting for players...[/]"
         elif connected_players > self.num_players:
             status_message = "[bold red]Too many players...[/]"
+        else:
+            status_message = ""
         self.status_widget.update(status_message)
 
-        # Update dropdown if player has become the new host
-        if self.is_host and self.player_count_select.disabled:
-            self.player_count_select.disabled = False
+        if self.is_host:
+            if self.player_count_select.disabled:
+                self.player_count_select.disabled = False
 
-        # Update start button
         can_start = (
-            self.is_host and connected_players == self.num_players and all_connected
+            self.is_host
+            and connected_players == self.num_players
+            and all_connected
         )
 
         self.start_button.disabled = not can_start
@@ -167,25 +168,31 @@ class LobbyScreen(Screen):
 
         for player in self.players:
             self.players_widget.mount(
-                PlayerRow(player, self.is_host, self.identity["player_id"])
+                PlayerRow(player, self.is_host, self.identity.player_id)
             )
 
     def handle_disconnect(self):
 
         self.status_widget.update("[bold red]Connection to server lost.[/]")
 
-    def handle_message(self, data):
+    def handle_message(self, msg: ServerMessage):
 
-        handler = self.message_handlers.get(data["type"])
+        if isinstance(msg, WelcomeMessage):
+            self._handle_welcome(msg)
+        elif isinstance(msg, GameStartedMessage):
+            self._handle_game_started(msg)
+        elif isinstance(msg, LobbyStateMessage):
+            self._handle_lobby_state(msg)
+        elif isinstance(msg, KickedFromLobbyMessage):
+            self._handle_kicked_from_lobby(msg)
+        elif isinstance(msg, ServerChatMessage):
+            self._handle_chat(msg)
 
-        if handler:
-            handler(data)
-
-    def _handle_chat(self, data):
-        text = f"[cyan]{data['player_name']}:[/] {data['message']}"
+    def _handle_chat(self, msg: ServerChatMessage):
+        text = f"[cyan]{msg.player_name}:[/] {msg.message}"
         self.client.dispatch_to_ui(self.app, self.log_message, text)
 
-    def _handle_kicked_from_lobby(self, data):
+    def _handle_kicked_from_lobby(self, msg: KickedFromLobbyMessage):
 
         self.client.dispatch_to_ui(self.app, self._process_kick)
 
@@ -199,7 +206,7 @@ class LobbyScreen(Screen):
         self.is_host = False
 
         # Remove stored session
-        self.identity["session_id"] = None
+        self.identity.session_id = None
         save_identity(self.identity)
 
         # Clear widgets
@@ -215,54 +222,56 @@ class LobbyScreen(Screen):
         while len(self.app.screen_stack) > 2:
             self.app.pop_screen()
 
-    def _handle_welcome(self, data):
+    def _handle_welcome(self, msg: WelcomeMessage):
 
-        self.session_id = data["session_id"]
+        self.session_id = msg.session_id
 
-        self.identity["player_id"] = data.get("player_id")
+        self.identity.player_id = msg.player_id
 
-        self.identity["session_id"] = data["session_id"]
+        self.identity.session_id = msg.session_id
 
         save_identity(self.identity)
 
-        self.player_number = data["player_number"]
+        self.player_number = msg.player_number
 
         # Only host can start the game
         if not self.is_host:
             self.start_button.disabled = True
             self.player_count_select.disabled = True
 
-        self.player_configs = data["players"]
+        self.player_configs = msg.players
 
         self.client.dispatch_to_ui(self.app, self.refresh_lobby)
 
-    def _handle_game_started(self, data):
+    def _handle_game_started(self, msg: GameStartedMessage):
 
-        self.player_number = data["player_number"]
+        self.player_number = msg.player_number
 
-        self.player_configs = data["player_configs"]
+        self.player_configs = msg.player_configs
 
         self.client.dispatch_to_ui(self.app, self._enter_game_screen)
 
-    def _handle_lobby_state(self, data):
+    def _handle_lobby_state(self, msg: LobbyStateMessage):
 
-        self.session_id = data["session_id"]
+        self.session_id = msg.session_id
 
-        self.players = data["players"]
+        self.players = msg.players
 
-        self.num_players = data["num_players"]
+        self.num_players = msg.num_players
 
-        self.is_host = data["is_host"]
+        self.is_host = msg.is_host
+
+        if not self.is_host:
+            self.player_count_select.value = msg.num_players
 
         self.client.dispatch_to_ui(self.app, self.refresh_lobby)
 
     def _enter_game_screen(self):
 
         self.client.send(
-            {
-                "type": "debug",
-                "message": f"Lobby Screen: _enter_game_screen: {self.player_number}",
-            }
+            DebugMessage(
+                message=f"Lobby Screen: _enter_game_screen: {self.player_number}"
+            )
         )
 
         self.app.push_screen(
@@ -274,19 +283,19 @@ class LobbyScreen(Screen):
     def on_button_pressed(self, event):
 
         if event.button.id == "start_game":
-            self.client.send({"type": START_GAME})
+            self.client.send(StartGameMessage())
 
         if event.button.id.startswith("kick_"):
             player_id = event.button.id.removeprefix("kick_")
 
-            self.client.send({"type": KICK_PLAYER, "player_id": player_id})
+            self.client.send(KickPlayerMessage(player_id=player_id))
 
             return
 
         if event.button.id == "leave_lobby":
-            self.client.send({"type": LEAVE_LOBBY})
+            self.client.send(LeaveLobbyMessage())
 
-            self.identity["session_id"] = None
+            self.identity.session_id = None
 
             save_identity(self.identity)
 
@@ -301,11 +310,12 @@ class LobbyScreen(Screen):
             if event.value is Select.NULL:
                 return
 
-            self.client.send({"type": UPDATE_NUM_PLAYERS, "num_players": event.value})
+            assert isinstance(event.value, int)
+            self.client.send(UpdateNumPlayersMessage(num_players=event.value))
 
     def on_input_submitted(self, event: Input.Submitted):
         if event.input.id == "chat_input":
-            self.client.send({"type": CHAT, "message": event.value})
+            self.client.send(ClientChatMessage(message=event.value))
             event.input.value = ""
 
 
@@ -329,7 +339,7 @@ class PlayerRow(Horizontal):
     }
     """
 
-    def __init__(self, player, is_host_user, current_player_id):
+    def __init__(self, player: LobbyPlayer, is_host_user, current_player_id):
         super().__init__()
 
         self.player = player
@@ -345,21 +355,21 @@ class PlayerRow(Horizontal):
         if self.show_kick():
             yield Button(
                 "Kick",
-                id=f"kick_{self.player['player_id']}",
+                id=f"kick_{self.player.player_id}",
                 classes="kick-button",
                 compact=True,
             )
 
     def name_text(self):
-        name = self.player["name"]
-        if self.player["connected"]:
+        name = self.player.name
+        if self.player.connected:
             name += " [green](connected)[/]"
         else:
             name += " [red](disconnected)[/]"
-        if self.player["is_host"]:
+        if self.player.is_host:
             name += " [grey](host)[/]"
 
         return name
 
     def show_kick(self):
-        return self.is_host_user and self.player["player_id"] != self.current_player_id
+        return self.is_host_user and self.player.player_id != self.current_player_id

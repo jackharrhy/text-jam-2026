@@ -1,30 +1,33 @@
 import socket
 import threading
-import traceback
 import time
+import traceback
 
 from chinese_checkers.game.player import Player
 from chinese_checkers.server.session_manager import SessionManager
-from chinese_checkers.shared.network import send_json, receive_json, safe_send_json
+from chinese_checkers.shared.models import (
+    ConnectMessage,
+    DebugMessage,
+    DuplicatePlayerMessage,
+    ErrorMessage,
+    InvalidSessionMessage,
+    LeaveGameMessage,
+    LeaveLobbyMessage,
+    ServerHeartbeatMessage,
+    SessionValidatedMessage,
+    WelcomeMessage,
+    client_adapter,
+)
+from chinese_checkers.shared.network import (
+    receive_json,
+    safe_send_message,
+    send_message,
+)
 from chinese_checkers.shared.settings import (
-    LISTEN_HOST,
-    SERVER_PORT,
-    PROTOCOL_VERSION,
     HEARTBEAT_INTERVAL,
-)
-from chinese_checkers.shared.messages import (
-    make_welcome,
-    make_error,
-    make_invalid_session,
-    make_session_validated,
-    make_duplicate_player,
-    make_server_heartbeat,
-)
-from chinese_checkers.shared.message_types import (
-    CONNECT,
-    DEBUG,
-    LEAVE_LOBBY,
-    LEAVE_GAME,
+    LISTEN_HOST,
+    PROTOCOL_VERSION,
+    SERVER_PORT,
 )
 
 manager = SessionManager()
@@ -36,6 +39,7 @@ def handle_connection(manager, conn):
 
     try:
         data, buffer = receive_json(conn, buffer)
+        client_msg = client_adapter.validate_python(data)
 
     except ValueError as e:
         print(f"Rejected connection: {e}")
@@ -50,20 +54,20 @@ def handle_connection(manager, conn):
         conn.close()
         return
 
-    if data.get("type") != CONNECT:
+    if not isinstance(client_msg, ConnectMessage):
         conn.close()
         return
 
-    client_version = data.get("protocol_version")
+    client_version = client_msg.protocol_version
 
     if client_version != PROTOCOL_VERSION:
-        send_json(conn, make_error("Client version mismatch."))
+        send_message(conn, ErrorMessage(message="Client version mismatch."))
 
         conn.close()
         return
 
-    player_id = data["player_id"]
-    session_id = data.get("session_id")
+    player_id = client_msg.player_id
+    session_id = client_msg.session_id
     session = None
 
     # Identity file has session id
@@ -72,7 +76,7 @@ def handle_connection(manager, conn):
 
         # Session ID belongs to expired / invalid session.
         if session is None:
-            send_json(conn, make_invalid_session())
+            send_message(conn, InvalidSessionMessage())
             conn.close()
             return
 
@@ -80,17 +84,17 @@ def handle_connection(manager, conn):
 
         # Trying to connect to session while already connected (Duplicate player).
         if player_id in session_players:
-            send_json(conn, make_duplicate_player())
+            send_message(conn, DuplicatePlayerMessage())
             conn.close()
             return
 
         # Session is valid
         player_num = session.get_player_num(player_id)
-        send_json(conn, make_session_validated(session, player_num))
+        send_message(conn, SessionValidatedMessage.for_session(session, player_num))
 
     # Player created a new session
     if session is None:
-        num_players = data.get("num_players", 2)
+        num_players = client_msg.num_players or 2
         session = manager.create_session(num_players)
         session_id = session.session_id
 
@@ -109,12 +113,12 @@ def handle_connection(manager, conn):
 
     # New player connecting to session
     else:
-        player = Player(player_id, data["name"], session.session_id)
+        player = Player(player_id, client_msg.name, session.session_id)
         player.attach_connection(conn)
         player.last_seen = time.time()
         session.add_player(player)
         print(f"\nPlayer id: {player_id} connected to Session id: {session.session_id}")
-        send_json(conn, make_welcome(player, session))
+        send_message(conn, WelcomeMessage.for_player(player, session))
 
     buffer = ""
     player_exit_type = None
@@ -127,20 +131,22 @@ def handle_connection(manager, conn):
             if data is None:
                 break
 
-            if data["type"] == DEBUG:
-                print("DEBUG: ", data["message"])
+            client_msg = client_adapter.validate_python(data)
+
+            if isinstance(client_msg, DebugMessage):
+                print("DEBUG: ", client_msg.message)
 
                 continue
 
-            if data["type"] == LEAVE_LOBBY:
+            if isinstance(client_msg, LeaveLobbyMessage):
                 player_exit_type = "lobby"
                 break
 
-            if data["type"] == LEAVE_GAME:
+            if isinstance(client_msg, LeaveGameMessage):
                 player_exit_type = "game"
                 break
 
-            session.handle_message(player, data)
+            session.handle_message(player, client_msg)
 
         except ValueError as e:
             print("\nClient sent invalid/oversized message:", e)
@@ -213,7 +219,7 @@ def heartbeat_loop():
         for session in sessions:
             for player in session.players.values():
                 if player.connected and player.connection:
-                    safe_send_json(player, make_server_heartbeat())
+                    safe_send_message(player, ServerHeartbeatMessage())
 
 
 def cleanup_loop():

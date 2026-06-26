@@ -1,7 +1,7 @@
 from chinese_checkers.ui.geometry import (
+    get_zone_for_coord,
     is_adjacent_move,
     is_jump_move,
-    get_zone_for_coord,
 )
 
 
@@ -94,10 +94,10 @@ def validate_move(board, players, player_number, path):
     from_zone = get_zone_for_coord(move_from)
     to_zone = get_zone_for_coord(move_to)
 
-    player_config = next(p for p in players if p["player"] == player_number)
+    player_config = next(p for p in players if p.player == player_number)
 
-    start_zone = player_config["start"]
-    target_zone = player_config["goal"]
+    start_zone = player_config.start
+    target_zone = player_config.goal
 
     # Prevent returning to home triangle
     if from_zone is None and to_zone == start_zone:

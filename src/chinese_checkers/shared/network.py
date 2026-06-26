@@ -1,11 +1,13 @@
 import json
 
+from pydantic import BaseModel
+
 MAX_MESSAGE_SIZE = 8192
 
 
-def send_json(conn, data):
+def send_message(conn, msg: BaseModel):
 
-    message = json.dumps(data) + "\n"
+    message = msg.model_dump_json(exclude_none=True) + "\n"
 
     conn.send(message.encode())
 
@@ -34,13 +36,13 @@ def receive_json(conn, buffer):
         raise ValueError("Invalid JSON received")
 
 
-def safe_send_json(player, data):
+def safe_send_message(player, msg: BaseModel):
 
     if not player.connected or not player.connection:
         return False
 
     try:
-        send_json(player.connection, data)
+        send_message(player.connection, msg)
         return True
 
     except OSError:

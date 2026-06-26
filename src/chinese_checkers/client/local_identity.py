@@ -1,5 +1,6 @@
-import json
 from pathlib import Path
+
+from chinese_checkers.shared.models import Identity
 
 IDENTIFY_FILE = Path.home() / ".chinese_checkers_identity.json"
 
@@ -9,14 +10,12 @@ def load_identity():
     if not IDENTIFY_FILE.exists():
         return None
 
-    with open(IDENTIFY_FILE, "r") as f:
-        return json.load(f)
+    return Identity.model_validate_json(IDENTIFY_FILE.read_text())
 
 
-def save_identity(identity):
+def save_identity(identity: Identity):
 
-    with open(IDENTIFY_FILE, "w") as f:
-        json.dump(identity, f)
+    IDENTIFY_FILE.write_text(identity.model_dump_json())
 
 
 def clear_identity():

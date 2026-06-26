@@ -2,34 +2,35 @@ import threading
 import time
 
 from chinese_checkers.game.game_state import GameState
-from chinese_checkers.shared.network import send_json, safe_send_json
-from chinese_checkers.game.move_validator import validate_partial_move, validate_move
-from chinese_checkers.server.session_states import LOBBY, IN_PROGRESS
-from chinese_checkers.shared.messages import (
-    make_game_state,
-    make_lobby_state,
-    make_partial_validation,
-    make_game_started,
-    make_player_joined_game,
-    make_player_reconnected,
-    make_player_disconnected,
-    make_welcome,
-    make_kicked_from_lobby,
-    make_player_quit,
-    make_chat,
+from chinese_checkers.game.move_validator import validate_move, validate_partial_move
+from chinese_checkers.game.player import Player
+from chinese_checkers.server.session_states import IN_PROGRESS, LOBBY
+from chinese_checkers.shared.models import (
+    ClientChatMessage,
+    ClientMessage,
+    ErrorMessage,
+    GameStartedMessage,
+    GameStateMessage,
+    KickedFromLobbyMessage,
+    KickPlayerMessage,
+    LobbyPlayer,
+    LobbyStateMessage,
+    MoveMessage,
+    PartialValidationMessage,
+    PlayerDisconnectedMessage,
+    PlayerJoinedGameMessage,
+    PlayerQuitMessage,
+    PlayerReconnectedMessage,
+    ServerChatMessage,
+    ServerMessage,
+    StartGameMessage,
+    UpdateNumPlayersMessage,
+    ValidatePartialMessage,
+    WelcomeMessage,
 )
-from chinese_checkers.shared.message_types import (
-    ERROR,
-    VALIDATE_PARTIAL,
-    MOVE,
-    START_GAME,
-    UPDATE_NUM_PLAYERS,
-    KICK_PLAYER,
-    CHAT,
-)
+from chinese_checkers.shared.network import safe_send_message, send_message
 
 RECONNECT_TIMEOUT = 300  # Clean up session after five minutes of inactivity.
-
 
 class Session:
     def __init__(self, session_id, num_players):
@@ -38,7 +39,7 @@ class Session:
         self.lobby_num_players = num_players
         self.game_num_players = None
 
-        self.players = {}
+        self.players: dict = {}
 
         self.host_player_id = None
 
@@ -48,19 +49,10 @@ class Session:
 
         self.state = LOBBY
 
-        self.chat_history = []
+        self.chat_history: list[ServerChatMessage] = []
 
         self.created_at = time.time()
         self.last_activity = time.time()
-
-        self.message_handlers = {
-            VALIDATE_PARTIAL: self._handle_validate_partial,
-            MOVE: self._handle_move_message,
-            START_GAME: self._handle_start_game_message,
-            UPDATE_NUM_PLAYERS: self._handle_update_num_players,
-            KICK_PLAYER: self._handle_kick_player,
-            CHAT: self._handle_chat,
-        }
 
     def add_player(self, player):
 
@@ -72,7 +64,7 @@ class Session:
         self.players[player.player_id] = player
 
         for msg in self.chat_history:
-            safe_send_json(player, msg)
+            safe_send_message(player, msg)
 
         self.broadcast_session_state()
 
@@ -125,16 +117,16 @@ class Session:
 
         return None
 
-    def serialize_players(self):
+    def serialize_players(self) -> list[LobbyPlayer]:
 
         return [
-            {
-                "player_id": player.player_id,
-                "name": player.name,
-                "player_number": player.player_number,
-                "connected": player.connected,
-                "is_host": player.player_id == self.host_player_id,
-            }
+            LobbyPlayer(
+                player_id=player.player_id,
+                name=player.name,
+                player_number=player.player_number,
+                connected=player.connected,
+                is_host=player.player_id == self.host_player_id,
+            )
             for player in self.players.values()
         ]
 
@@ -146,13 +138,18 @@ class Session:
             self.host_player_id = player.player_id
 
         for msg in self.chat_history:
-            safe_send_json(player, msg)
+            safe_send_message(player, msg)
 
         if self.state == LOBBY:
-            safe_send_json(player, make_welcome(player, self))
+            safe_send_message(player, WelcomeMessage.for_player(player, self))
 
         elif self.state == IN_PROGRESS:
-            self.broadcast_to_game(make_player_reconnected(player))
+            self.broadcast_to_game(
+                PlayerReconnectedMessage(
+                    player_name=player.name,
+                    player_number=player.player_number,
+                )
+            )
 
     def handle_disconnect(self, player):
 
@@ -168,7 +165,12 @@ class Session:
             self.assign_new_host()
 
         if self.state == IN_PROGRESS:
-            self.broadcast_to_game(make_player_disconnected(player))
+            self.broadcast_to_game(
+                PlayerDisconnectedMessage(
+                    player_name=player.name,
+                    player_number=player.player_number,
+                )
+            )
 
         self.broadcast_session_state()
 
@@ -198,13 +200,13 @@ class Session:
 
         return True
 
-    def broadcast_to_game(self, message):
+    def broadcast_to_game(self, message: ServerMessage):
         if self.state != IN_PROGRESS:
             return
 
         for player in self.players.values():
             if player.connection:
-                safe_send_json(player, message)
+                safe_send_message(player, message)
 
     def broadcast_session_state(self):
 
@@ -218,14 +220,17 @@ class Session:
         print("broadcasting lobby state")
         for player in self.players.values():
             if player.connected and player.connection:
-                safe_send_json(player, make_lobby_state(self, player))
+                safe_send_message(player, LobbyStateMessage.for_player(self, player))
 
     def broadcast_game_state(self):
 
         print("broadcasting game state")
         for player in self.players.values():
             if player.connected and player.connection:
-                safe_send_json(player, make_game_state(self.game_state))
+                safe_send_message(
+                    player,
+                    GameStateMessage.from_game_state(self.game_state),
+                )
 
     def start_game(self):
 
@@ -242,23 +247,35 @@ class Session:
         for player in self.players.values():
             print(f"Player {player.name} has number {player.player_number}")
             if player.connected:
-                safe_send_json(player, make_game_started(self, player))
+                safe_send_message(player, GameStartedMessage.for_player(self, player))
 
                 for msg in self.chat_history:
-                    safe_send_json(player, msg)
+                    safe_send_message(player, msg)
                 for joined_player in self.players.values():
-                    safe_send_json(player, make_player_joined_game(joined_player))
+                    safe_send_message(
+                        player,
+                        PlayerJoinedGameMessage(
+                            player_name=joined_player.name,
+                            player_number=joined_player.player_number,
+                        ),
+                    )
 
         self.broadcast_session_state()
 
-    def handle_message(self, player, data):
+    def handle_message(self, player, msg: ClientMessage):
 
-        message_type = data.get("type")
-
-        handler = self.message_handlers.get(message_type)
-
-        if handler:
-            handler(player, data)
+        if isinstance(msg, ValidatePartialMessage):
+            self._handle_validate_partial(player, msg)
+        elif isinstance(msg, MoveMessage):
+            self._handle_move_message(player, msg)
+        elif isinstance(msg, StartGameMessage):
+            self._handle_start_game_message(player, msg)
+        elif isinstance(msg, ClientChatMessage):
+            self._handle_chat(player, msg)
+        elif isinstance(msg, UpdateNumPlayersMessage):
+            self._handle_update_num_players(player, msg)
+        elif isinstance(msg, KickPlayerMessage):
+            self._handle_kick_player(player, msg)
 
     def handle_leave_game(self, player):
         if self.state != IN_PROGRESS:
@@ -266,7 +283,12 @@ class Session:
 
         player.disconnect()
 
-        self.broadcast_to_game(make_player_quit(player))
+        self.broadcast_to_game(
+            PlayerQuitMessage(
+                player_name=player.name,
+                player_number=player.player_number,
+            )
+        )
 
         self.remove_player(player)
 
@@ -276,28 +298,24 @@ class Session:
             except:
                 pass
 
-    def _handle_chat(self, player, data):
-        message = data.get("message", "").strip()
+    def _handle_chat(self, player, msg: ClientChatMessage):
+        message = msg.message.strip()
         if not message:
             return
 
-        chat_msg = make_chat(player, message)
+        chat_msg = ServerChatMessage.from_player(player, message)
 
         self.chat_history.append(chat_msg)
-
-        # limit memory
-        # if len(self.chat_history) > 200:
-        #     self.chat_history.pop(0)
 
         # broadcast to everyone (lobby OR game)
         self.broadcast_chat(chat_msg)
 
-    def broadcast_chat(self, message):
+    def broadcast_chat(self, message: ServerChatMessage):
         for player in self.players.values():
             if player.connection:
-                safe_send_json(player, message)
+                safe_send_message(player, message)
 
-    def _handle_start_game_message(self, player, data=None):
+    def _handle_start_game_message(self, player, msg: StartGameMessage):
 
         if player.player_id != self.host_player_id:
             return
@@ -310,29 +328,29 @@ class Session:
 
         self.start_game()
 
-    def _handle_validate_partial(self, player, data):
+    def _handle_validate_partial(self, player, msg: ValidatePartialMessage):
 
-        path = [tuple(coord) for coord in data["path"]]
+        path = [tuple(coord) for coord in msg.path]
 
         response = self.validate_partial_selection(player, path)
 
-        send_json(player.connection, response)
+        send_message(player.connection, response)
 
-    def _handle_move_message(self, player, data):
+    def _handle_move_message(self, player, msg: MoveMessage):
 
-        path = [tuple(coord) for coord in data["path"]]
+        path = [tuple(coord) for coord in msg.path]
 
         result = self.handle_move(player, path)
 
-        if not result["success"]:
-            send_json(player.connection, result["response"])
+        if result is not None:
+            send_message(player.connection, result)
 
-    def _handle_update_num_players(self, player, data):
+    def _handle_update_num_players(self, player, msg):
 
         if player.player_id != self.host_player_id:
             return
 
-        self.lobby_num_players = data["num_players"]
+        self.lobby_num_players = msg.num_players
 
         self.broadcast_session_state()
 
@@ -351,7 +369,7 @@ class Session:
             except:
                 pass
 
-    def _handle_kick_player(self, player, data):
+    def _handle_kick_player(self, player, msg):
 
         if self.state != LOBBY:
             return
@@ -359,7 +377,7 @@ class Session:
         if player.player_id != self.host_player_id:
             return
 
-        target_id = data["player_id"]
+        target_id = msg.player_id
 
         if target_id == self.host_player_id:
             return
@@ -369,7 +387,7 @@ class Session:
         if not target:
             return
 
-        safe_send_json(target, make_kicked_from_lobby())
+        safe_send_message(target, KickedFromLobbyMessage())
 
         self.remove_player(target)
 
@@ -383,27 +401,25 @@ class Session:
 
     def validate_partial_selection(self, player, path):
 
+        assert self.game_state is not None
+
         with self.lock:
             valid, reason = validate_partial_move(
                 self.game_state.board, player.player_number, path
             )
 
-        return make_partial_validation(valid, reason)
+        return PartialValidationMessage(valid=valid, message=reason)
 
-    def handle_move(self, player, path):
+    def handle_move(self, player, path) -> ErrorMessage | None:
 
         if self.state != IN_PROGRESS:
-            return {
-                "success": False,
-                "response": {"type": ERROR, "message": "Game is not active."},
-            }
+            return ErrorMessage(message="Game is not active.")
+
+        assert self.game_state is not None
 
         with self.lock:
             if not self.game_state.is_players_turn(player.player_number):
-                return {
-                    "success": False,
-                    "response": {"type": ERROR, "message": "Not your turn."},
-                }
+                return ErrorMessage(message="Not your turn.")
 
             valid, reason = validate_move(
                 self.game_state.board,
@@ -413,10 +429,7 @@ class Session:
             )
 
             if not valid:
-                return {
-                    "success": False,
-                    "response": {"type": ERROR, "message": reason},
-                }
+                return ErrorMessage(message=reason)
 
             self.game_state.apply_move(path[0], path[-1])
 
@@ -424,4 +437,4 @@ class Session:
 
         self.broadcast_session_state()
 
-        return {"success": True}
+        return None
