@@ -53,6 +53,7 @@ python-version = "3.13"
 
 [dependency-groups]
 dev = [
+    "pytest>=9.1.1",
     "ruff>=0.15.18",
     "ty>=0.0.51",
 ]
