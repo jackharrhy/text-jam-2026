@@ -1,7 +1,7 @@
-from textual.screen import Screen
 from textual.app import ComposeResult
+from textual.containers import CenterMiddle, Vertical, VerticalScroll
+from textual.screen import Screen
 from textual.widgets import Button, Markdown
-from textual.containers import Vertical, CenterMiddle, VerticalScroll
 
 CONTROLS_MARKDOWN = r"""
 > **Move cursor**
@@ -47,7 +47,7 @@ class ControlsScreen(Screen):
     def compose(self) -> ComposeResult:
 
         markdown = Markdown(CONTROLS_MARKDOWN)
-        markdown.code_indent_guides = False
+        markdown.code_indent_guides = False  # ty: ignore[unresolved-attribute]
 
         with CenterMiddle():
             with Vertical(id="controls_container"):

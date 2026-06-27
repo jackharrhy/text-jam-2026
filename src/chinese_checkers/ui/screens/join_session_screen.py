@@ -1,12 +1,17 @@
-from textual.screen import Screen
 from textual.app import ComposeResult
+from textual.containers import CenterMiddle, Horizontal, Vertical
+from textual.screen import Screen
 from textual.widgets import Button, Input
-from textual.containers import Vertical, CenterMiddle, Horizontal
+
 
 from chinese_checkers.client.local_identity import save_identity
-from chinese_checkers.ui.screens.lobby_screen import LobbyScreen
+from chinese_checkers.shared.models import (
+    InvalidSessionMessage,
+    ServerMessage,
+    SessionValidatedMessage,
+)
 from chinese_checkers.shared.settings import PUBLIC_SERVER_HOST, SERVER_PORT
-from chinese_checkers.shared.message_types import SESSION_VALIDATED, INVALID_SESSION
+from chinese_checkers.ui.screens.lobby_screen import LobbyScreen
 
 
 class JoinSessionScreen(Screen):
@@ -32,11 +37,6 @@ class JoinSessionScreen(Screen):
     def __init__(self):
         super().__init__()
 
-        self.message_handlers = {
-            SESSION_VALIDATED: self._handle_session_validated,
-            INVALID_SESSION: self._handle_invalid_session,
-        }
-
     def compose(self) -> ComposeResult:
 
         self.session_id_input = Input(placeholder="Enter session ID", id="session_id")
@@ -54,28 +54,27 @@ class JoinSessionScreen(Screen):
 
         join_session_container.border_title = "[bold yellow]Join Session[/]"
 
-        self.app.client.on_message = self.handle_message
+        self.app.client.on_message = self.handle_message  # ty: ignore[unresolved-attribute]
 
         self.session_id_input.focus()
 
-    def handle_message(self, data):
+    def handle_message(self, msg: ServerMessage):
+        if isinstance(msg, SessionValidatedMessage):
+            self._handle_session_validated(msg)
+        elif isinstance(msg, InvalidSessionMessage):
+            self._handle_invalid_session(msg)
 
-        handler = self.message_handlers.get(data["type"])
-
-        if handler:
-            handler(data)
-
-    def _handle_session_validated(self, data):
+    def _handle_session_validated(self, _msg):
 
         self.app.call_from_thread(
-            self.app.push_screen, LobbyScreen(self.app.client, self.app.client.identity)
+            self.app.push_screen, LobbyScreen(self.app.client, self.app.client.identity)  # ty: ignore[unresolved-attribute]
         )
 
-    def _handle_invalid_session(self, data):
+    def _handle_invalid_session(self, _msg):
 
-        identity = self.app.client.identity
+        identity = self.app.client.identity  # ty: ignore[unresolved-attribute]
 
-        identity["session_id"] = None
+        identity.session_id = None
 
         save_identity(identity)
 
@@ -93,7 +92,7 @@ class JoinSessionScreen(Screen):
             if not session_id:
                 return
 
-            client = self.app.client
+            client = self.app.client  # ty: ignore[unresolved-attribute]
 
             identity = client.identity
 

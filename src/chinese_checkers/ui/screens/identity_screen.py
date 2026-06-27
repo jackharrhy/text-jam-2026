@@ -1,11 +1,12 @@
-from textual.screen import Screen
-from textual.app import ComposeResult
-from textual.widgets import Input, Button, Static
-from textual.containers import Vertical, CenterMiddle
-
 import uuid
+from textual.app import ComposeResult
+from textual.containers import CenterMiddle, Vertical
+from textual.screen import Screen
+from textual.widgets import Button, Input
+
 
 from chinese_checkers.client.local_identity import save_identity
+from chinese_checkers.shared.models import Identity
 
 
 class IdentityScreen(Screen):
@@ -53,14 +54,13 @@ class IdentityScreen(Screen):
         if not entered_name:
             return
 
-        identity = {
-            "player_id": str(uuid.uuid4()),
-            "session_id": None,
-            "name": entered_name,
-        }
+        identity = Identity(
+            player_id=str(uuid.uuid4()),
+            name=entered_name,
+        )
 
         save_identity(identity)
 
-        self.app.client.identity = identity
+        self.app.client.identity = identity  # ty: ignore[unresolved-attribute]
 
         self.app.pop_screen()

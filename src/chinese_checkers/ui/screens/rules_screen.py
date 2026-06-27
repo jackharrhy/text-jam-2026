@@ -1,7 +1,7 @@
-from textual.screen import Screen
 from textual.app import ComposeResult
+from textual.containers import CenterMiddle, Vertical, VerticalScroll
+from textual.screen import Screen
 from textual.widgets import Button, Markdown
-from textual.containers import Vertical, CenterMiddle, VerticalScroll
 
 RULES_MARKDOWN = r"""
 > **Objective**
@@ -66,7 +66,7 @@ class RulesScreen(Screen):
     def compose(self) -> ComposeResult:
 
         markdown = Markdown(RULES_MARKDOWN)
-        markdown.code_indent_guides = False
+        markdown.code_indent_guides = False  # ty: ignore[unresolved-attribute]
 
         with CenterMiddle():
             with Vertical(id="rules_container"):

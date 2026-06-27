@@ -12,7 +12,9 @@ requires-python = ">=3.13"
 license = {file = "LICENSE"}
 
 dependencies = [
-    "textual"
+    "pydantic>=2.13.4",
+    "python-dotenv>=1.2.2",
+    "textual",
 ]
 
 [project.scripts]

@@ -1,8 +1,15 @@
 import socket
 import threading
 import time
-from chinese_checkers.shared.network import send_json, receive_json
-from chinese_checkers.shared.message_types import CONNECT, DEBUG, SERVER_HEARTBEAT
+
+from chinese_checkers.shared.models import (
+    ClientMessage,
+    ConnectMessage,
+    DebugMessage,
+    ServerHeartbeatMessage,
+    server_adapter,
+)
+from chinese_checkers.shared.network import receive_json, send_message
 from chinese_checkers.shared.settings import PROTOCOL_VERSION, SERVER_TIMEOUT
 
 
@@ -13,7 +20,7 @@ class GameClient:
         self.watchdog_thread = None
 
         self.running = False
-        self.last_server_heartbeat = None
+        self.last_server_heartbeat = 0.0
 
         self.buffer = ""
 
@@ -51,23 +58,22 @@ class GameClient:
         self.connect(host, port)
 
         self.send(
-            {
-                "type": CONNECT,
-                "protocol_version": PROTOCOL_VERSION,
-                "player_id": identity["player_id"],
-                "session_id": session_id,
-                "name": identity["name"],
-                "num_players": num_players,
-            }
+            ConnectMessage(
+                protocol_version=PROTOCOL_VERSION,
+                player_id=identity.player_id,
+                session_id=session_id,
+                name=identity.name,
+                num_players=num_players,
+            )
         )
 
-    def send(self, data):
+    def send(self, msg: ClientMessage):
 
         if not self.socket:
             return False
 
         try:
-            send_json(self.socket, data)
+            send_message(self.socket, msg)
 
             return True
 
@@ -90,15 +96,17 @@ class GameClient:
                     self._handle_disconnect()
                     return
 
-                if data["type"] == SERVER_HEARTBEAT:
+                server_msg = server_adapter.validate_python(data)
+
+                if isinstance(server_msg, ServerHeartbeatMessage):
                     self.last_server_heartbeat = time.time()
                     continue
 
                 if self.on_message:
-                    self.on_message(data)
+                    self.on_message(server_msg)
 
             except Exception as e:
-                self.send({"type": DEBUG, "message": f"EXCEPTION: GAME_CLIENT.PY: {e}"})
+                self.send(DebugMessage(message=f"EXCEPTION: GAME_CLIENT.PY: {e}"))
 
                 self._handle_disconnect()
                 return
@@ -128,7 +136,8 @@ class GameClient:
         self.running = False
 
         try:
-            self.socket.close()
+            if self.socket is not None:
+                self.socket.close()
         except:
             pass
 

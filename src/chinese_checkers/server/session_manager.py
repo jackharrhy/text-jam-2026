@@ -1,5 +1,4 @@
 import random
-import string
 import threading
 
 from chinese_checkers.server.session import Session

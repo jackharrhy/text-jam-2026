@@ -1,4 +1,12 @@
-ROWS = [
+from typing import TypedDict
+
+
+class RowDict(TypedDict):
+    spacing: int
+    tiles: list[tuple[int, int]]
+
+
+ROWS: list[RowDict] = [
     {  # A
         "spacing": 12,
         "tiles": [(0, 0)],

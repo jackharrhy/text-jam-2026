@@ -1,29 +1,31 @@
-from textual.screen import Screen
+from rich.text import Text
 from textual.app import ComposeResult
-from textual.widgets import Static, RichLog, Button, Input
 from textual.containers import Horizontal, Vertical
 from textual.events import Key
-from rich.text import Text
+from textual.screen import Screen
 
-from chinese_checkers.ui.screens.rules_screen import RulesScreen
-from chinese_checkers.ui.screens.controls_screen import ControlsScreen
-from chinese_checkers.ui.board_renderer import BoardRenderer
-from chinese_checkers.ui.board_layout import ZONE_CURSOR_STARTS
-from chinese_checkers.ui.geometry import DIRECTIONS
-from chinese_checkers.shared.messages import make_leave_game
+from textual.widgets import Button, Input, RichLog, Static
 
-from chinese_checkers.shared.message_types import (
-    GAME_STATE,
-    VALIDATE_PARTIAL,
-    PARTIAL_VALIDATION,
-    MOVE,
-    ERROR,
-    PLAYER_RECONNECTED,
-    PLAYER_JOINED_GAME,
-    PLAYER_DISCONNECTED,
-    PLAYER_QUIT,
-    CHAT,
+from chinese_checkers.shared.models import (
+    ClientChatMessage,
+    ErrorMessage,
+    GameStateMessage,
+    LeaveGameMessage,
+    MoveMessage,
+    PartialValidationMessage,
+    PlayerDisconnectedMessage,
+    PlayerJoinedGameMessage,
+    PlayerQuitMessage,
+    PlayerReconnectedMessage,
+    ServerChatMessage,
+    ServerMessage,
+    ValidatePartialMessage,
 )
+from chinese_checkers.ui.board_layout import ZONE_CURSOR_STARTS
+from chinese_checkers.ui.board_renderer import BoardRenderer
+from chinese_checkers.ui.geometry import DIRECTIONS
+from chinese_checkers.ui.screens.controls_screen import ControlsScreen
+from chinese_checkers.ui.screens.rules_screen import RulesScreen
 
 
 class GameScreen(Screen):
@@ -97,17 +99,6 @@ class GameScreen(Screen):
         self.client.on_disconnect = self.handle_disconnect
         self.client.log_message = self.log_message
 
-        self.message_handlers = {
-            GAME_STATE: self._handle_game_state,
-            PARTIAL_VALIDATION: self._handle_partial_validation,
-            ERROR: self._handle_error,
-            PLAYER_RECONNECTED: self._handle_player_reconnect,
-            PLAYER_DISCONNECTED: self._handle_player_disconnect,
-            PLAYER_JOINED_GAME: self._handle_player_joined_game,
-            PLAYER_QUIT: self._handle_player_quit,
-            CHAT: self._handle_chat,
-        }
-
     def compose(self) -> ComposeResult:
 
         self.board_widget = Static(id="game_board")
@@ -145,7 +136,7 @@ class GameScreen(Screen):
 
         game_screen_container = self.query_one("#game_screen_container", Horizontal)
         game_screen_container.border_title = (
-            f"[bold yellow]Session ID: {self.identity['session_id']}[/]"
+            f"[bold yellow]Session ID: {self.identity.session_id}[/]"
         )
 
         game_chat = self.query_one("#game_chat", RichLog)
@@ -162,7 +153,7 @@ class GameScreen(Screen):
             (
                 config
                 for config in self.player_configs
-                if config["player"] == self.player_number
+                if config.player == self.player_number
             ),
             None,
         )
@@ -170,7 +161,7 @@ class GameScreen(Screen):
         if player_config is None:
             return
 
-        start_zone = player_config["start"]
+        start_zone = player_config.start
 
         self.cursor = ZONE_CURSOR_STARTS[start_zone]
 
@@ -188,40 +179,55 @@ class GameScreen(Screen):
 
         self.log_message("[bold red]Connection to server lost...[/]")
 
-    def handle_message(self, data):
+    def handle_message(self, msg: ServerMessage):
 
-        handler = self.message_handlers.get(data["type"])
+        if isinstance(msg, GameStateMessage):
+            self._handle_game_state(msg)
+        elif isinstance(msg, PartialValidationMessage):
+            self._handle_partial_validation(msg)
+        elif isinstance(msg, ErrorMessage):
+            self._handle_error(msg)
+        elif isinstance(msg, PlayerReconnectedMessage):
+            self._handle_player_reconnect(msg)
+        elif isinstance(msg, PlayerDisconnectedMessage):
+            self._handle_player_disconnect(msg)
+        elif isinstance(msg, PlayerJoinedGameMessage):
+            self._handle_player_joined_game(msg)
+        elif isinstance(msg, PlayerQuitMessage):
+            self._handle_player_quit(msg)
+        elif isinstance(msg, ServerChatMessage):
+            self._handle_chat(msg)
 
-        if handler:
-            handler(data)
+    def _handle_chat(self, msg: ServerChatMessage):
 
-    def _handle_chat(self, data):
+        player_style = self.get_player_style(msg.player_number)
 
-        player_style = self.get_player_style(data["player_number"])
-
-        message = Text(f"{data['player_name']}", style=player_style)
+        message = Text(f"{msg.player_name}", style=player_style)
 
         message.append(": ", style="white")
-        message.append(data["message"], style="white")
+        message.append(msg.message, style="white")
 
         self.client.dispatch_to_ui(self.app, self.log_message, message)
 
     def get_player_style(self, player_number):
 
+        if self.player_configs is None:
+            return "cyan"
+
         config = next(
             (
                 config
                 for config in self.player_configs
-                if config["player"] == player_number
+                if config.player == player_number
             ),
             None,
         )
 
-        return str(config["piece"]) if config else "cyan"
+        return str(config.piece) if config else "cyan"
 
-    def _handle_game_state(self, data):
+    def _handle_game_state(self, msg: GameStateMessage):
 
-        serialized_board = data["board"]
+        serialized_board = msg.board
 
         new_board = {}
         for key, value in serialized_board.items():
@@ -229,30 +235,26 @@ class GameScreen(Screen):
             new_board[(q, r)] = value
 
         self.client.dispatch_to_ui(
-            self.app,
-            self.update_game_state,
-            new_board,
-            data["current_player"],
-            data.get("winner"),
+            self.app, self.update_game_state, new_board, msg.current_player, msg.winner
         )
 
-    def _handle_partial_validation(self, data):
+    def _handle_partial_validation(self, msg: PartialValidationMessage):
 
         self.client.dispatch_to_ui(
             self.app,
             self.handle_partial_validation,
-            data["valid"],
-            data["message"],
+            msg.valid,
+            msg.message,
             self.cursor,
         )
 
-    def _handle_error(self, data):
+    def _handle_error(self, msg: ErrorMessage):
 
-        self.client.dispatch_to_ui(self.app, self.show_error, data["message"])
+        self.client.dispatch_to_ui(self.app, self.show_error, msg.message)
 
-    def _handle_player_reconnect(self, data):
+    def _handle_player_reconnect(self, msg: PlayerReconnectedMessage):
 
-        player_name = data["player_name"]
+        player_name = msg.player_name
 
         self.client.dispatch_to_ui(
             self.app,
@@ -260,9 +262,9 @@ class GameScreen(Screen):
             f"[green]{player_name} reconnected to the game.[/]",
         )
 
-    def _handle_player_disconnect(self, data):
+    def _handle_player_disconnect(self, msg: PlayerDisconnectedMessage):
 
-        player_name = data["player_name"]
+        player_name = msg.player_name
 
         self.client.dispatch_to_ui(
             self.app,
@@ -270,21 +272,18 @@ class GameScreen(Screen):
             f"[green]{player_name} disconnected from the game.[/]",
         )
 
-    def _handle_player_quit(self, data):
+    def _handle_player_quit(self, msg: PlayerQuitMessage):
 
-        player_name = data["player_name"]
+        player_name = msg.player_name
 
         self.client.dispatch_to_ui(
             self.app, self.log_message, f"[green]{player_name} quit the game.[/]"
         )
 
-    def _handle_player_joined_game(self, data):
+    def _handle_player_joined_game(self, msg: PlayerJoinedGameMessage):
 
         self.client.dispatch_to_ui(
-            self.app,
-            self.show_player_joined,
-            data["player_name"],
-            data["player_number"],
+            self.app, self.show_player_joined, msg.player_name, msg.player_number
         )
 
     def show_player_joined(self, player_name, player_number):
@@ -421,6 +420,9 @@ class GameScreen(Screen):
             return
 
         if key in DIRECTIONS:
+            if self.cursor is None:
+                return
+
             direction = DIRECTIONS[key]
 
             new_coord = (self.cursor[0] + direction[0], self.cursor[1] + direction[1])
@@ -433,7 +435,7 @@ class GameScreen(Screen):
         elif key == "space":
             proposed_path = self.selected_path + [self.cursor]
 
-            self.client.send({"type": VALIDATE_PARTIAL, "path": proposed_path})
+            self.client.send(ValidatePartialMessage(path=proposed_path))
 
         elif key == "enter":
             if self.app.focused != None and self.app.focused.id == "chat_input":
@@ -474,12 +476,12 @@ class GameScreen(Screen):
 
     def on_input_submitted(self, event: Input.Submitted):
         if event.input.id == "chat_input":
-            self.client.send({"type": CHAT, "message": event.value})
+            self.client.send(ClientChatMessage(message=event.value))
             event.input.value = ""
 
     def send_move(self):
 
-        self.client.send({"type": MOVE, "path": self.selected_path})
+        self.client.send(MoveMessage(path=self.selected_path))
 
     def handle_partial_validation(self, valid, message, coord):
 
@@ -505,7 +507,7 @@ class GameScreen(Screen):
 
     def quit_game(self):
 
-        self.client.send(make_leave_game())
+        self.client.send(LeaveGameMessage())
 
         self.my_turn = False
 
