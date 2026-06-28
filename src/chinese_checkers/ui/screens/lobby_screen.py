@@ -63,6 +63,7 @@ class LobbyScreen(Screen):
         self.session_id = None
         self.players: list[LobbyPlayer] = []
         self.num_players = None
+        self.cpu_count = 0
         self.player_configs: list[PlayerConfig] | None = None
 
         self.client.on_message = self.handle_message
@@ -94,11 +95,26 @@ class LobbyScreen(Screen):
 
         self.chat_input = Input(placeholder="Say something...", id="chat_input")
 
+        self.cpu_count_select = Select(
+            [
+                ("0 CPUs", 0),
+                ("1 CPU", 1),
+                ("2 CPUs", 2),
+                ("3 CPUs", 3),
+                ("4 CPUs", 4),
+                ("5 CPUs", 5),
+            ],
+            value=0,
+            prompt="Number of CPUs",
+            id="cpu_count",
+        )
+
         with CenterMiddle():
             with Horizontal(id="main_lobby_container"):
                 with Vertical():
                     yield self.session_id_widget
                     yield self.player_count_select
+                    yield self.cpu_count_select
                     yield self.status_widget
                     yield self.players_widget
                     with Horizontal(id="lobby_button_container"):
@@ -136,14 +152,17 @@ class LobbyScreen(Screen):
 
         all_connected = all(player.connected for player in self.players)
 
-        if connected_players == self.num_players and all_connected:
+        cpu = min(self.cpu_count or 0, self.num_players - connected_players)
+        total_players = connected_players + cpu
+
+        if total_players == self.num_players and all_connected:
             if self.is_host:
                 status_message = "[bold green]Ready to start game[/]"
             else:
                 status_message = "[bold green]Waiting for host to start game[/]"
-        elif connected_players < self.num_players or not all_connected:
+        elif connected_players < (self.num_players - cpu) or not all_connected:
             status_message = "[bold yellow]Waiting for players...[/]"
-        elif connected_players > self.num_players:
+        elif connected_players > (self.num_players - cpu):
             status_message = "[bold red]Too many players...[/]"
         else:
             status_message = ""
@@ -152,10 +171,12 @@ class LobbyScreen(Screen):
         if self.is_host:
             if self.player_count_select.disabled:
                 self.player_count_select.disabled = False
+            if self.cpu_count_select.disabled:
+                self.cpu_count_select.disabled = False
 
         can_start = (
             self.is_host
-            and connected_players == self.num_players
+            and total_players == self.num_players
             and all_connected
         )
 
@@ -238,6 +259,7 @@ class LobbyScreen(Screen):
         if not self.is_host:
             self.start_button.disabled = True
             self.player_count_select.disabled = True
+            self.cpu_count_select.disabled = True
 
         self.player_configs = msg.players
 
@@ -283,7 +305,7 @@ class LobbyScreen(Screen):
     def on_button_pressed(self, event):
 
         if event.button.id == "start_game":
-            self.client.send(StartGameMessage())
+            self.client.send(StartGameMessage(cpu_count=self.cpu_count or 0))
 
         if event.button.id.startswith("kick_"):
             player_id = event.button.id.removeprefix("kick_")
@@ -312,6 +334,14 @@ class LobbyScreen(Screen):
 
             assert isinstance(event.value, int)
             self.client.send(UpdateNumPlayersMessage(num_players=event.value))
+
+        elif event.select.id == "cpu_count":
+            if event.value is Select.NULL:
+                return
+
+            assert isinstance(event.value, int)
+            self.cpu_count = event.value
+            self.refresh_lobby()
 
     def on_input_submitted(self, event: Input.Submitted):
         if event.input.id == "chat_input":
@@ -362,7 +392,9 @@ class PlayerRow(Horizontal):
 
     def name_text(self):
         name = self.player.name
-        if self.player.connected:
+        if self.player.is_cpu:
+            name += " [grey][CPU][/]"
+        elif self.player.connected:
             name += " [green](connected)[/]"
         else:
             name += " [red](disconnected)[/]"

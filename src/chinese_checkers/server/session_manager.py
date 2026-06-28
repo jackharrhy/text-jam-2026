@@ -20,12 +20,16 @@ class SessionManager:
             if session_id not in self.sessions:
                 return session_id
 
-    def create_session(self, num_players):
+    def create_session(self, num_players, cpu_count=0):
 
         with self.lock:
             session_id = self.generate_session_id()
 
-            session = Session(session_id=session_id, num_players=num_players)
+            session = Session(
+                session_id=session_id,
+                num_players=num_players,
+                cpu_count=cpu_count,
+            )
 
             self.sessions[session_id] = session
 
