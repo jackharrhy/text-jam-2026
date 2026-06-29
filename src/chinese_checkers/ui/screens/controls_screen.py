@@ -8,9 +8,9 @@ CONTROLS_MARKDOWN = r"""
 ```text
          (up-left)       (up-right)
                   \     /
-                  [W] [E]
-      (left) -- [A]     [D] -- (right)
-                  [Z] [X]
+              [W/K/Y] [E/U]
+      (left) -- [A/H]     [D/L] -- (right)
+              [Z/B] [X/J/N]
                   /     \
        (down-left)       (down-right)
 ```
@@ -18,6 +18,7 @@ CONTROLS_MARKDOWN = r"""
 > **Piece/Tile Selection/Deselection**
 ```text
     [SPACE] -- (select piece/tile)
+    [CLICK] -- (select clicked piece/tile)
     [ESC]   -- (deselect last tile/piece)
     [TAB]   -- (cycle through pieces)
 ```

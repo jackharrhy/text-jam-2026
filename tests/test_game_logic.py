@@ -1,6 +1,5 @@
 from chinese_checkers.game.board_initializer import create_initial_board
 from chinese_checkers.game.cpu_brain import generate_move
-from chinese_checkers.game.game_state import GameState
 from chinese_checkers.game.move_validator import (
     validate_move,
     validate_partial_move,
@@ -8,7 +7,7 @@ from chinese_checkers.game.move_validator import (
 from chinese_checkers.game.player_configs import PLAYER_CONFIGS
 from chinese_checkers.game.win_checker import check_winner
 from chinese_checkers.shared.models import PlayerConfig
-from chinese_checkers.ui.board_layout import VALID_COORDS
+from chinese_checkers.ui.board_layout import VALID_COORDS, coord_at_render_position
 from chinese_checkers.ui.geometry import is_adjacent_move, is_jump_move
 
 
@@ -63,6 +62,19 @@ class TestGameState:
 
 
 class TestGeometry:
+    def test_render_position_maps_tile_character_to_coord(self):
+        assert coord_at_render_position(12, 0) == (0, 0)
+
+    def test_render_position_maps_tile_separator_to_previous_coord(self):
+        assert coord_at_render_position(13, 0) == (0, 0)
+
+    def test_render_position_ignores_leading_space(self):
+        assert coord_at_render_position(11, 0) is None
+
+    def test_render_position_ignores_out_of_board_position(self):
+        assert coord_at_render_position(0, -1) is None
+        assert coord_at_render_position(999, 0) is None
+
     def test_adjacent_horizontal(self):
         assert is_adjacent_move((0, 0), (1, 0)) is True
 
@@ -79,8 +91,6 @@ class TestGeometry:
                 continue
             board[coord] = 2
             break
-        from_coord = None
-        empty_behind = None
         for coord in VALID_COORDS:
             board[coord] = None
         board[(0, 0)] = 1
@@ -93,18 +103,14 @@ class TestMoveValidation:
     def test_validate_partial_select_own_piece(self, game_state_2p):
         for coord, occupant in game_state_2p.board.items():
             if occupant == 1:
-                valid, reason = validate_partial_move(
-                    game_state_2p.board, 1, [coord]
-                )
+                valid, reason = validate_partial_move(game_state_2p.board, 1, [coord])
                 assert valid, f"Should be valid: {reason}"
                 break
 
     def test_validate_partial_wrong_player(self, game_state_2p):
         for coord, occupant in game_state_2p.board.items():
             if occupant == 1:
-                valid, reason = validate_partial_move(
-                    game_state_2p.board, 2, [coord]
-                )
+                valid, reason = validate_partial_move(game_state_2p.board, 2, [coord])
                 assert not valid
                 assert "Not your piece" in reason
                 break
@@ -112,16 +118,12 @@ class TestMoveValidation:
     def test_validate_partial_empty_tile(self, game_state_2p):
         for coord, occupant in game_state_2p.board.items():
             if occupant is None:
-                valid, reason = validate_partial_move(
-                    game_state_2p.board, 1, [coord]
-                )
+                valid, reason = validate_partial_move(game_state_2p.board, 1, [coord])
                 assert not valid
                 break
 
     def test_validate_partial_invalid_coord(self, game_state_2p):
-        valid, reason = validate_partial_move(
-            game_state_2p.board, 1, [(-999, -999)]
-        )
+        valid, reason = validate_partial_move(game_state_2p.board, 1, [(-999, -999)])
         assert not valid
 
     def test_validate_move_adjacent(self, game_state_2p):
@@ -130,20 +132,24 @@ class TestMoveValidation:
         for coord, occupant in game_state_2p.board.items():
             if occupant == 1 and from_coord is None:
                 from_coord = coord
-            elif occupant is None and is_adjacent_move(from_coord, coord) if from_coord else False:
+            elif (
+                occupant is None and is_adjacent_move(from_coord, coord)
+                if from_coord
+                else False
+            ):
                 to_coord = coord
                 break
         if from_coord and to_coord:
             valid, reason = validate_move(
-                game_state_2p.board, game_state_2p.players,
-                1, [from_coord, to_coord],
+                game_state_2p.board,
+                game_state_2p.players,
+                1,
+                [from_coord, to_coord],
             )
             assert valid, f"Adjacent move should be valid: {reason}"
 
     def test_apply_move(self, game_state_2p):
-        move = generate_move(
-            game_state_2p.board, game_state_2p.players, 1
-        )
+        move = generate_move(game_state_2p.board, game_state_2p.players, 1)
         assert move is not None, "Should find a legal move"
         from_coord = move[0]
         to_coord = move[-1]
