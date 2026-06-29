@@ -272,3 +272,22 @@ ZONE_CURSOR_STARTS = {
 }
 
 VALID_COORDS = {coord for row in ROWS for coord in row["tiles"]}
+
+
+def coord_at_render_position(x: int, y: int) -> tuple[int, int] | None:
+
+    if y < 0 or y >= len(ROWS):
+        return None
+
+    row = ROWS[y]
+    column = x - row["spacing"]
+
+    if column < 0:
+        return None
+
+    tile_index = column // 2
+
+    if tile_index >= len(row["tiles"]):
+        return None
+
+    return row["tiles"][tile_index]
