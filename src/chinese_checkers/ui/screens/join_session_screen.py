@@ -3,7 +3,6 @@ from textual.containers import CenterMiddle, Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Input
 
-
 from chinese_checkers.client.local_identity import save_identity
 from chinese_checkers.shared.models import (
     InvalidSessionMessage,
@@ -11,14 +10,15 @@ from chinese_checkers.shared.models import (
     SessionValidatedMessage,
 )
 from chinese_checkers.shared.settings import PUBLIC_SERVER_HOST, SERVER_PORT
+from chinese_checkers.ui.screens.game_screen import GameScreen
 from chinese_checkers.ui.screens.lobby_screen import LobbyScreen
 
 
 class JoinSessionScreen(Screen):
     DEFAULT_CSS = """
-    #join_session_container {
-    width: 50;
-    height: 11;
+        #join_session_container {
+        width: 50;
+        height: 13;
     border: ascii white;
     padding: 1;
     }
@@ -36,6 +36,7 @@ class JoinSessionScreen(Screen):
 
     def __init__(self):
         super().__init__()
+        self.pending_spectator = False
 
     def compose(self) -> ComposeResult:
 
@@ -47,6 +48,7 @@ class JoinSessionScreen(Screen):
                 with Horizontal():
                     yield Button("Back", id="back")
                     yield Button("Join", id="join_session")
+                    yield Button("Spectate", id="spectate_session")
 
     def on_mount(self):
 
@@ -64,10 +66,30 @@ class JoinSessionScreen(Screen):
         elif isinstance(msg, InvalidSessionMessage):
             self._handle_invalid_session(msg)
 
-    def _handle_session_validated(self, _msg):
+    def _handle_session_validated(self, msg):
+        if self.pending_spectator:
+            if msg.session_state != "in_progress":
+                self.app.call_from_thread(
+                    self.notify,
+                    "Spectators can only join active games.",
+                    severity="error",
+                )
+                return
+
+            self.app.call_from_thread(
+                self.app.push_screen,
+                GameScreen(
+                    self.app.client,  # ty: ignore[unresolved-attribute]
+                    self.app.client.identity,  # ty: ignore[unresolved-attribute]
+                    None,
+                    msg.player_configs,
+                ),
+            )
+            return
 
         self.app.call_from_thread(
-            self.app.push_screen, LobbyScreen(self.app.client, self.app.client.identity)  # ty: ignore[unresolved-attribute]
+            self.app.push_screen,
+            LobbyScreen(self.app.client, self.app.client.identity),  # ty: ignore[unresolved-attribute]
         )
 
     def _handle_invalid_session(self, _msg):
@@ -84,7 +106,7 @@ class JoinSessionScreen(Screen):
 
     def on_button_pressed(self, event: Button.Pressed):
 
-        if event.button.id == "join_session":
+        if event.button.id in {"join_session", "spectate_session"}:
             session_input = self.query_one("#session_id", Input)
 
             session_id = session_input.value.strip().upper()
@@ -95,10 +117,15 @@ class JoinSessionScreen(Screen):
             client = self.app.client  # ty: ignore[unresolved-attribute]
 
             identity = client.identity
+            self.pending_spectator = event.button.id == "spectate_session"
 
             try:
                 client.connect_to_session(
-                    PUBLIC_SERVER_HOST, SERVER_PORT, identity, session_id=session_id
+                    PUBLIC_SERVER_HOST,
+                    SERVER_PORT,
+                    identity,
+                    session_id=session_id,
+                    spectator=self.pending_spectator,
                 )
 
             except ConnectionRefusedError:

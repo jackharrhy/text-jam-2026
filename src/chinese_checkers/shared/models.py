@@ -221,6 +221,7 @@ class ConnectMessage(BaseModel):
     name: str
     session_id: str | None = None
     num_players: int | None = None
+    spectator: bool = False
 
 
 class MoveMessage(BaseModel):

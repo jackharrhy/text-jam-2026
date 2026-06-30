@@ -3,9 +3,13 @@ import threading
 import time
 import traceback
 
+from websockets.sync.server import serve
+
 from chinese_checkers.game.player import Player
 from chinese_checkers.server.session_manager import SessionManager
+from chinese_checkers.server.session_states import IN_PROGRESS
 from chinese_checkers.shared.models import (
+    ClientChatMessage,
     ConnectMessage,
     DebugMessage,
     DuplicatePlayerMessage,
@@ -19,15 +23,20 @@ from chinese_checkers.shared.models import (
     client_adapter,
 )
 from chinese_checkers.shared.network import (
+    SocketConnection,
+    WebSocketConnection,
     receive_json,
     safe_send_message,
     send_message,
 )
 from chinese_checkers.shared.settings import (
+    ENABLE_WEBSOCKET_SERVER,
     HEARTBEAT_INTERVAL,
     LISTEN_HOST,
     PROTOCOL_VERSION,
     SERVER_PORT,
+    WEBSOCKET_LISTEN_HOST,
+    WEBSOCKET_PORT,
 )
 
 manager = SessionManager()
@@ -49,6 +58,7 @@ def handle_connection(manager, conn):
         return
     except (ConnectionResetError, OSError):
         conn.close()
+        return
 
     if data is None:
         conn.close()
@@ -69,6 +79,10 @@ def handle_connection(manager, conn):
     player_id = client_msg.player_id
     session_id = client_msg.session_id
     session = None
+
+    if client_msg.spectator:
+        handle_spectator_connection(manager, conn, client_msg, buffer)
+        return
 
     # Identity file has session id
     if session_id:
@@ -172,7 +186,93 @@ def handle_connection(manager, conn):
     conn.close()
 
 
+def handle_spectator_connection(manager, conn, connect_msg, buffer):
+    if not connect_msg.session_id:
+        send_message(
+            conn, ErrorMessage(message="Spectators must provide a session ID.")
+        )
+        conn.close()
+        return
+
+    session = manager.get_session(connect_msg.session_id)
+
+    if session is None:
+        send_message(conn, InvalidSessionMessage())
+        conn.close()
+        return
+
+    if session.state != IN_PROGRESS:
+        send_message(
+            conn, ErrorMessage(message="Spectators can only join active games.")
+        )
+        conn.close()
+        return
+
+    send_message(
+        conn,
+        SessionValidatedMessage.for_session(session, None),
+    )
+    session.add_spectator(connect_msg.player_id, conn)
+
+    while True:
+        try:
+            data, buffer = receive_json(conn, buffer)
+
+            if data is None:
+                break
+
+            client_msg = client_adapter.validate_python(data)
+
+            if isinstance(client_msg, DebugMessage):
+                print("DEBUG: ", client_msg.message)
+                continue
+
+            if isinstance(client_msg, LeaveGameMessage):
+                break
+
+            if isinstance(client_msg, ClientChatMessage):
+                session.handle_spectator_chat(connect_msg.name, client_msg)
+
+        except ValueError as e:
+            print("\nSpectator sent invalid/oversized message:", e)
+            break
+        except Exception as e:
+            print("\nError: spectator receive loop:", e)
+            traceback.print_exc()
+            break
+
+    session.remove_spectator(connect_msg.player_id)
+    conn.close()
+
+
+def handle_websocket_connection(websocket):
+    print("Server.py: New WebSocket connection")
+    handle_connection(manager, WebSocketConnection(websocket))
+
+
+def start_websocket_server():
+    try:
+        with serve(
+            handle_websocket_connection,
+            WEBSOCKET_LISTEN_HOST,
+            WEBSOCKET_PORT,
+        ) as websocket_server:
+            print(
+                "Server.py: WebSocket server started "
+                f"on {WEBSOCKET_LISTEN_HOST}:{WEBSOCKET_PORT}"
+            )
+            websocket_server.serve_forever()
+    except OSError as e:
+        print(f"Server.py: WebSocket server failed to start: {e}")
+
+
 def start_server():
+
+    if ENABLE_WEBSOCKET_SERVER and WEBSOCKET_PORT == SERVER_PORT:
+        print(
+            "Server.py: WebSocket listener disabled because WEBSOCKET_PORT matches "
+            "SERVER_PORT. Use a separate port or add a protocol multiplexer."
+        )
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -187,7 +287,11 @@ def start_server():
 
     cleanup_thread.start()
 
-    print("Server.py: Server started")
+    if ENABLE_WEBSOCKET_SERVER and WEBSOCKET_PORT != SERVER_PORT:
+        websocket_thread = threading.Thread(target=start_websocket_server, daemon=True)
+        websocket_thread.start()
+
+    print(f"Server.py: TCP server started on {LISTEN_HOST}:{SERVER_PORT}")
 
     try:
         while True:
@@ -195,7 +299,10 @@ def start_server():
 
             print(f"Server.py: New connection: {addr}")
 
-            thread = threading.Thread(target=handle_connection, args=(manager, conn))
+            thread = threading.Thread(
+                target=handle_connection,
+                args=(manager, SocketConnection(conn)),
+            )
 
             thread.start()
 

@@ -1,28 +1,27 @@
-import threading
-import time
-import uuid
-
 import pytest
 
 from chinese_checkers.game.cpu_brain import generate_move
-from chinese_checkers.game.game_state import GameState
-from chinese_checkers.game.move_validator import validate_move
 from chinese_checkers.game.player import Player
 from chinese_checkers.server.session import Session
 from chinese_checkers.server.session_states import IN_PROGRESS, LOBBY
 from chinese_checkers.shared.models import (
     ClientChatMessage,
-    ErrorMessage,
-    MoveMessage,
-    PlayerConfig,
-    ServerChatMessage,
+    KickPlayerMessage,
+    PartialValidationMessage,
     StartGameMessage,
     UpdateNumPlayersMessage,
-    ValidatePartialMessage,
-    PartialValidationMessage,
-    KickPlayerMessage,
-    LeaveLobbyMessage,
 )
+
+
+class FakeConnection:
+    def __init__(self):
+        self.sent = []
+
+    def send(self, data):
+        self.sent.append(data.decode().strip())
+
+    def close(self):
+        pass
 
 
 class TestSessionLifecycle:
@@ -71,10 +70,48 @@ class TestSessionLifecycle:
         p = Player(player_id="p1", name="Alice", session_id="ABCD")
         p.connected = True
         s.add_player(p)
-        s.broadcast_to_game(
-            PartialValidationMessage(valid=True, message="")
-        )
+        s.broadcast_to_game(PartialValidationMessage(valid=True, message=""))
         # Should not raise — silently skipped in lobby state
+
+    def test_spectator_does_not_count_as_player(self):
+        s = Session(session_id="ABCD", num_players=2, cpu_count=1)
+        p = Player(player_id="p1", name="Alice", session_id="ABCD")
+        p.connected = True
+        s.add_player(p)
+        s.start_game()
+
+        s.add_spectator("spec1", FakeConnection())
+
+        assert "spec1" not in s.players
+        assert len(s.spectators) == 1
+
+    def test_spectator_receives_game_state_broadcast(self):
+        s = Session(session_id="ABCD", num_players=2, cpu_count=1)
+        p = Player(player_id="p1", name="Alice", session_id="ABCD")
+        p.connected = True
+        s.add_player(p)
+        s.start_game()
+        conn = FakeConnection()
+
+        s.add_spectator("spec1", conn)
+        s.broadcast_game_state()
+
+        assert any('"type":"game_state"' in message for message in conn.sent)
+
+    def test_spectator_chat_broadcasts_to_players_and_spectators(self):
+        s = Session(session_id="ABCD", num_players=2, cpu_count=1)
+        player_conn = FakeConnection()
+        p = Player(player_id="p1", name="Alice", session_id="ABCD")
+        p.attach_connection(player_conn)
+        s.add_player(p)
+        s.start_game()
+        spectator_conn = FakeConnection()
+        s.add_spectator("spec1", spectator_conn)
+
+        s.handle_spectator_chat("Watcher", ClientChatMessage(message="nice jump"))
+
+        assert any("Watcher [spectator]" in message for message in player_conn.sent)
+        assert any("Watcher [spectator]" in message for message in spectator_conn.sent)
 
 
 class TestSessionStartGame:
@@ -163,15 +200,15 @@ class TestHandleMove:
 
         current = s.game_state.current_player_number
         human_player_number = next(
-            p.player_number for p in s.players.values()
-            if not p.is_cpu
+            p.player_number for p in s.players.values() if not p.is_cpu
         )
 
         if current != human_player_number:
             pytest.skip("Human doesn't go first — CPU will play")
 
         move = generate_move(
-            s.game_state.board, s.game_state.players,
+            s.game_state.board,
+            s.game_state.players,
             human_player_number,
         )
         assert move is not None, "Should find a legal move"
@@ -193,8 +230,7 @@ class TestHandleMove:
 
         current = s.game_state.current_player_number
         wrong_player = next(
-            (p for p in s.players.values()
-             if p.player_number != current),
+            (p for p in s.players.values() if p.player_number != current),
             None,
         )
         if wrong_player is None:
@@ -238,9 +274,7 @@ class TestHandleOtherMessages:
         board = s.game_state.board
         for coord, occupant in board.items():
             if occupant == player.player_number:
-                result = s.validate_partial_selection(
-                    player, [coord]
-                )
+                result = s.validate_partial_selection(player, [coord])
                 assert result.valid is True
                 break
 
@@ -302,8 +336,11 @@ class TestFullGameFlow:
             current = s.game_state.current_player_number
 
             cpu_player = next(
-                (p for p in s.players.values()
-                 if p.player_number == current and p.is_cpu),
+                (
+                    p
+                    for p in s.players.values()
+                    if p.player_number == current and p.is_cpu
+                ),
                 None,
             )
 
@@ -327,7 +364,9 @@ class TestFullGameFlow:
                 )
                 if move is not None:
                     result = s.handle_move(human, move)
-                    assert result is None, f"Move rejected: {result.message if result else 'ok'}"
+                    assert result is None, (
+                        f"Move rejected: {result.message if result else 'ok'}"
+                    )
                 else:
                     break
 
