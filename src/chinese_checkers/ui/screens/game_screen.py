@@ -1,9 +1,8 @@
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.events import Key
+from textual.events import Click, Key
 from textual.screen import Screen
-
 from textual.widgets import Button, Input, RichLog, Static
 
 from chinese_checkers.shared.models import (
@@ -21,7 +20,10 @@ from chinese_checkers.shared.models import (
     ServerMessage,
     ValidatePartialMessage,
 )
-from chinese_checkers.ui.board_layout import ZONE_CURSOR_STARTS
+from chinese_checkers.ui.board_layout import (
+    ZONE_CURSOR_STARTS,
+    coord_at_render_position,
+)
 from chinese_checkers.ui.board_renderer import BoardRenderer
 from chinese_checkers.ui.geometry import DIRECTIONS
 from chinese_checkers.ui.screens.controls_screen import ControlsScreen
@@ -29,6 +31,18 @@ from chinese_checkers.ui.screens.rules_screen import RulesScreen
 
 
 class GameScreen(Screen):
+    CURSOR_DIRECTIONS = {
+        **DIRECTIONS,
+        "h": DIRECTIONS["a"],
+        "j": DIRECTIONS["x"],
+        "k": DIRECTIONS["w"],
+        "l": DIRECTIONS["d"],
+        "y": DIRECTIONS["w"],
+        "u": DIRECTIONS["e"],
+        "b": DIRECTIONS["z"],
+        "n": DIRECTIONS["x"],
+    }
+
     BINDINGS = [
         ("tab", "cycle_piece", "Cycle Piece"),
         ("/", "focus_chat", "Chat"),
@@ -400,11 +414,30 @@ class GameScreen(Screen):
     def action_focus_chat(self):
         self.set_focus(self.chat_input)
 
-    def on_click(self, event):
+    def on_click(self, event: Click):
         chat_input = self.query_one("#chat_input")
 
         if event.widget != chat_input:
             self.app.set_focus(None)
+
+        if event.widget != self.board_widget or not self.my_turn:
+            return
+
+        board_offset = event.get_content_offset(self.board_widget)
+
+        if board_offset is None:
+            return
+
+        coord = coord_at_render_position(board_offset.x, board_offset.y)
+
+        if coord is None or coord not in self.board:
+            return
+
+        self.cursor = coord
+        self.refresh_board()
+
+        proposed_path = self.selected_path + [coord]
+        self.client.send(ValidatePartialMessage(path=proposed_path))
 
     def on_key(self, event: Key):
 
@@ -419,11 +452,11 @@ class GameScreen(Screen):
         if not self.my_turn:
             return
 
-        if key in DIRECTIONS:
+        if key in self.CURSOR_DIRECTIONS:
             if self.cursor is None:
                 return
 
-            direction = DIRECTIONS[key]
+            direction = self.CURSOR_DIRECTIONS[key]
 
             new_coord = (self.cursor[0] + direction[0], self.cursor[1] + direction[1])
 
@@ -438,7 +471,7 @@ class GameScreen(Screen):
             self.client.send(ValidatePartialMessage(path=proposed_path))
 
         elif key == "enter":
-            if self.app.focused != None and self.app.focused.id == "chat_input":
+            if self.app.focused is not None and self.app.focused.id == "chat_input":
                 return
 
             if len(self.selected_path) >= 2:
@@ -513,7 +546,7 @@ class GameScreen(Screen):
 
         try:
             self.client.close()
-        except:
+        except Exception:
             pass
 
         while len(self.app.screen_stack) > 2:
