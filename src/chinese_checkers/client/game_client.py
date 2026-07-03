@@ -52,7 +52,7 @@ class GameClient:
         self.watchdog_thread.start()
 
     def connect_to_session(
-        self, host, port, identity, session_id=None, num_players=None
+        self, host, port, identity, session_id=None, num_players=None, spectator=False
     ):
 
         self.connect(host, port)
@@ -64,6 +64,7 @@ class GameClient:
                 session_id=session_id,
                 name=identity.name,
                 num_players=num_players,
+                spectator=spectator,
             )
         )
 
@@ -138,7 +139,7 @@ class GameClient:
         try:
             if self.socket is not None:
                 self.socket.close()
-        except:
+        except Exception:
             pass
 
         self.socket = None

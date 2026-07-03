@@ -32,13 +32,20 @@ from chinese_checkers.shared.models import (
     ValidatePartialMessage,
     WelcomeMessage,
 )
-from chinese_checkers.shared.network import safe_send_message, send_message
+from chinese_checkers.shared.network import (
+    safe_send_connection,
+    safe_send_message,
+    send_message,
+)
 
 RECONNECT_TIMEOUT = 300  # Clean up session after five minutes of inactivity.
 
 CPU_NAMES = (
-    Path(__file__).parents[1] / "game" / "cpu_names.txt"
-).read_text().strip().splitlines()
+    (Path(__file__).parents[1] / "game" / "cpu_names.txt")
+    .read_text()
+    .strip()
+    .splitlines()
+)
 
 
 class Session:
@@ -61,6 +68,8 @@ class Session:
 
         self.chat_history: list[ServerChatMessage] = []
 
+        self.spectators = {}
+
         self.created_at = time.time()
         self.last_activity = time.time()
 
@@ -79,6 +88,20 @@ class Session:
         self.broadcast_session_state()
 
         return True
+
+    def add_spectator(self, spectator_id, conn):
+        self.spectators[spectator_id] = conn
+
+        for msg in self.chat_history:
+            safe_send_connection(conn, msg)
+
+        if self.game_state is not None:
+            safe_send_connection(
+                conn, GameStateMessage.from_game_state(self.game_state)
+            )
+
+    def remove_spectator(self, spectator_id):
+        self.spectators.pop(spectator_id, None)
 
     def remove_player(self, player):
 
@@ -193,8 +216,7 @@ class Session:
     def all_players_connected(self):
 
         return all(
-            player.connected or player.is_cpu
-            for player in self.players.values()
+            player.connected or player.is_cpu for player in self.players.values()
         )
 
     def touch(self):
@@ -222,6 +244,10 @@ class Session:
             if player.connection:
                 safe_send_message(player, message)
 
+        for spectator_id, conn in list(self.spectators.items()):
+            if not safe_send_connection(conn, message):
+                self.remove_spectator(spectator_id)
+
     def broadcast_session_state(self):
 
         if self.state is LOBBY:
@@ -245,6 +271,13 @@ class Session:
                     player,
                     GameStateMessage.from_game_state(self.game_state),
                 )
+
+        for spectator_id, conn in list(self.spectators.items()):
+            if not safe_send_connection(
+                conn,
+                GameStateMessage.from_game_state(self.game_state),
+            ):
+                self.remove_spectator(spectator_id)
 
     def start_game(self):
 
@@ -326,7 +359,7 @@ class Session:
         if player.connection:
             try:
                 player.connection.close()
-            except:
+            except Exception:
                 pass
 
     def _handle_chat(self, player, msg: ClientChatMessage):
@@ -345,6 +378,25 @@ class Session:
         for player in self.players.values():
             if player.connection:
                 safe_send_message(player, message)
+
+        for spectator_id, conn in list(self.spectators.items()):
+            if not safe_send_connection(conn, message):
+                self.remove_spectator(spectator_id)
+
+    def handle_spectator_chat(self, spectator_name, msg: ClientChatMessage):
+        message = msg.message.strip()
+        if not message:
+            return
+
+        chat_msg = ServerChatMessage(
+            player_name=f"{spectator_name} [spectator]",
+            player_number=None,
+            message=message,
+            timestamp=time.time(),
+        )
+
+        self.chat_history.append(chat_msg)
+        self.broadcast_chat(chat_msg)
 
     def _handle_start_game_message(self, player, msg: StartGameMessage):
 
@@ -399,7 +451,7 @@ class Session:
         if player.connection:
             try:
                 player.connection.close()
-            except:
+            except Exception:
                 pass
 
     def _handle_kick_player(self, player, msg):
@@ -429,7 +481,7 @@ class Session:
         if target.connection:
             try:
                 target.connection.close()
-            except:
+            except Exception:
                 pass
 
     def validate_partial_selection(self, player, path):
@@ -474,7 +526,6 @@ class Session:
 
         return None
 
-
     def process_cpu_turns(self):
 
         if self.state != IN_PROGRESS or self.game_state is None:
@@ -484,11 +535,7 @@ class Session:
             current_player = self.game_state.current_player_number
 
             cpu_player = next(
-                (
-                    p
-                    for p in self.players.values()
-                    if p.player_number == current_player
-                ),
+                (p for p in self.players.values() if p.player_number == current_player),
                 None,
             )
 
@@ -508,9 +555,7 @@ class Session:
                 )
 
                 if move is None:
-                    print(
-                        f"CPU {current_player} has no legal moves — skipping"
-                    )
+                    print(f"CPU {current_player} has no legal moves — skipping")
                     self.game_state.next_turn()
                     continue
 
