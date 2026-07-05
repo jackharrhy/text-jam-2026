@@ -1,5 +1,4 @@
 import json
-import threading
 
 from pydantic import BaseModel
 
@@ -18,30 +17,6 @@ class SocketConnection:
 
     def close(self):
         self.sock.close()
-
-
-class WebSocketConnection:
-    def __init__(self, websocket):
-        self.websocket = websocket
-        self.send_lock = threading.Lock()
-
-    def send(self, data: bytes):
-        message = data.decode("utf-8").rstrip("\n")
-        with self.send_lock:
-            self.websocket.send(message)
-
-    def recv(self, size: int) -> bytes:
-        message = self.websocket.recv()
-
-        if isinstance(message, bytes):
-            payload = message.decode("utf-8")
-        else:
-            payload = message
-
-        return f"{payload}\n".encode()
-
-    def close(self):
-        self.websocket.close()
 
 
 def send_message(conn, msg: BaseModel):

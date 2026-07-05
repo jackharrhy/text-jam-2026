@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chinese Checkers</title>
+    <link rel="stylesheet" href="https://unpkg.com/terminal.css@0.7.4/dist/terminal.min.css" />
+    <link rel="stylesheet" href="{{ url_for('static', path='/terminal.css') }}" />
+  </head>
+  <body>
+    <main class="screen menu-screen">
+      <section id="identity-panel" class="terminal-card cc-panel narrow" hidden>
+        <header>Enter Username</header>
+        <form id="identity-form" class="stack">
+          <input id="identity-name" autocomplete="name" placeholder="Enter your name" required />
+          <button class="btn btn-ghost" type="submit">Continue</button>
+        </form>
+      </section>
+
+      <section id="menu-panel" class="terminal-card cc-panel narrow" hidden>
+        <header>Chinese Checkers</header>
+        <nav class="menu-actions" aria-label="Main menu">
+          <form action="/game" method="get">
+            <input class="player-name" type="hidden" name="name" />
+            <button class="btn btn-ghost" type="submit">Create Session</button>
+          </form>
+
+          <button id="show-join" class="btn btn-ghost" type="button">Join Session</button>
+          <button id="show-rules" class="btn btn-ghost" type="button">Rules</button>
+          <button id="show-controls" class="btn btn-ghost" type="button">Controls</button>
+          <button id="quit" class="btn btn-ghost" type="button">Quit</button>
+        </nav>
+      </section>
+
+      <section id="join-panel" class="terminal-card cc-panel narrow overlay-panel" hidden>
+        <header>Join Session</header>
+        <form action="/game" method="get" class="stack">
+          <input class="player-name" type="hidden" name="name" />
+          <input name="session_id" placeholder="Enter session ID" required />
+          <div class="button-row">
+            <button class="back btn btn-ghost" type="button">Back</button>
+            <button class="btn btn-ghost" type="submit">Join</button>
+            <button class="btn btn-ghost" name="spectator" value="1" type="submit">Spectate</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="rules-panel" class="terminal-card cc-panel narrow overlay-panel" hidden>
+        <header>Rules</header>
+        <p>Move all of your pieces into the opposite point of the star.</p>
+        <p>Move to an adjacent empty hole, or jump over occupied holes in a chain.</p>
+        <button class="back btn btn-ghost" type="button">Back</button>
+      </section>
+
+      <section id="controls-panel" class="terminal-card cc-panel narrow overlay-panel" hidden>
+        <header>Controls</header>
+        <p>Click a piece, then click each destination in the path.</p>
+        <p>Use Cycle Piece, Clear Path, and Send Move for keyboard-like play.</p>
+        <button class="back btn btn-ghost" type="button">Back</button>
+      </section>
+
+      <button id="change-name" class="btn btn-ghost" type="button" hidden>Change Username</button>
+    </main>
+
+    <script>
+      const nameKey = "cc_player_name";
+      const identityPanel = document.getElementById("identity-panel");
+      const menuPanel = document.getElementById("menu-panel");
+      const overlays = [...document.querySelectorAll(".overlay-panel")];
+      const changeName = document.getElementById("change-name");
+
+      function setName(name) {
+        localStorage.setItem(nameKey, name);
+        for (const input of document.querySelectorAll(".player-name")) {
+          input.value = name;
+        }
+        identityPanel.hidden = true;
+        menuPanel.hidden = false;
+        changeName.hidden = false;
+      }
+
+      function showOverlay(id) {
+        menuPanel.hidden = true;
+        for (const overlay of overlays) overlay.hidden = overlay.id !== id;
+      }
+
+      function showMenu() {
+        for (const overlay of overlays) overlay.hidden = true;
+        menuPanel.hidden = false;
+      }
+
+      const savedName = localStorage.getItem(nameKey);
+      if (savedName) {
+        setName(savedName);
+      } else {
+        identityPanel.hidden = false;
+      }
+
+      document.getElementById("identity-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const name = document.getElementById("identity-name").value.trim();
+        if (name) setName(name);
+      });
+
+      document.getElementById("show-join").addEventListener("click", () => showOverlay("join-panel"));
+      document.getElementById("show-rules").addEventListener("click", () => showOverlay("rules-panel"));
+      document.getElementById("show-controls").addEventListener("click", () => showOverlay("controls-panel"));
+      document.getElementById("quit").addEventListener("click", () => document.body.classList.add("quit-state"));
+      changeName.addEventListener("click", () => {
+        localStorage.removeItem(nameKey);
+        menuPanel.hidden = true;
+        for (const overlay of overlays) overlay.hidden = true;
+        changeName.hidden = true;
+        identityPanel.hidden = false;
+        document.getElementById("identity-name").focus();
+      });
+      for (const button of document.querySelectorAll(".back")) {
+        button.addEventListener("click", showMenu);
+      }
+    </script>
+  </body>
+</html>

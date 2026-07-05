@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chinese Checkers Session</title>
+    <link rel="stylesheet" href="https://unpkg.com/terminal.css@0.7.4/dist/terminal.min.css" />
+    <link rel="stylesheet" href="{{ url_for('static', path='/terminal.css') }}" />
+  </head>
+  <body>
+    <main class="screen session-screen">
+      <section class="terminal-card cc-panel board-panel">
+        <header id="screen-title">Session ID: <strong id="session-id">connecting...</strong></header>
+        <div id="turn-status" class="status-line">connecting...</div>
+
+        <div id="lobby-panel" class="lobby-layout">
+          <div class="lobby-main">
+            <label>
+              <select id="player-count">
+                <option value="2">2 Players</option>
+                <option value="3">3 Players</option>
+                <option value="4">4 Players</option>
+                <option value="6">6 Players</option>
+              </select>
+            </label>
+            <label>
+              <select id="cpu-count">
+                <option value="0">0 CPUs</option>
+                <option value="1">1 CPU</option>
+                <option value="2">2 CPUs</option>
+                <option value="3">3 CPUs</option>
+                <option value="4">4 CPUs</option>
+                <option value="5">5 CPUs</option>
+              </select>
+            </label>
+            <div id="players" class="terminal-list"></div>
+          </div>
+
+          <div class="bottom-actions">
+            <a class="btn btn-ghost" href="/">Leave Lobby</a>
+            <button id="start-game" class="btn btn-ghost" type="button" disabled>Start Game</button>
+          </div>
+        </div>
+
+        <div id="game-panel" class="game-layout" hidden>
+          <canvas id="board" width="760" height="560"></canvas>
+          <div class="bottom-actions game-actions">
+            <button id="cycle-piece" class="btn btn-ghost" type="button">Cycle Piece</button>
+            <button id="clear-path" class="btn btn-ghost" type="button">Clear Path</button>
+            <button id="send-move" class="btn btn-ghost" type="button">Send Move</button>
+            <a class="btn btn-ghost" href="/">Quit</a>
+          </div>
+          <div id="path-readout" class="status-line muted">path: empty</div>
+        </div>
+      </section>
+
+      <aside class="terminal-card cc-panel chat-panel">
+        <header>Chat</header>
+        <div id="identity" class="identity-line"></div>
+        <div id="log" class="log"></div>
+        <form id="chat-form" class="chat-form">
+          <input id="chat-input" placeholder="Say something..." autocomplete="off" />
+        </form>
+      </aside>
+    </main>
+
+    <script>
+      window.CHINESE_CHECKERS_BOOT = {
+        name: {{ name|tojson }},
+        sessionId: {{ session_id|tojson }},
+        spectator: {{ spectator|tojson }},
+        rows: {{ rows_json|safe }},
+        homeZones: {{ home_zones_json|safe }},
+        colors: {{ colors_json|safe }},
+      };
+    </script>
+    <script src="{{ url_for('static', path='/game.js') }}"></script>
+  </body>
+</html>
