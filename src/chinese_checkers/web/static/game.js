@@ -155,7 +155,7 @@ function handleMessage(msg) {
     history.replaceState(
       null,
       "",
-      `/game?name=${encodeURIComponent(boot.name)}&session_id=${sessionId}${boot.spectator ? "&spectator=1" : ""}`,
+      `/game?name=${encodeURIComponent(boot.name)}&session_id=${encodeURIComponent(sessionId)}${boot.spectator ? "&spectator=1" : ""}`,
     );
     writeLog("system", `welcome to session ${sessionId}`);
     for (const chat of msg.chat_history ?? []) printChat(chat);
@@ -295,9 +295,17 @@ function renderPlayers() {
   const isHost = players.some((player) => player.player_id === playerId && player.is_host);
   const allConnected = players.every((player) => player.connected);
 
-  playersEl.innerHTML = players.length
-    ? players.map(renderPlayerRow).join("")
-    : "<div>Waiting for server...</div>";
+  playersEl.replaceChildren();
+
+  if (players.length) {
+    for (const player of players) {
+      playersEl.append(renderPlayerRow(player));
+    }
+  } else {
+    const row = document.createElement("div");
+    row.textContent = "Waiting for server...";
+    playersEl.append(row);
+  }
 
   const ready = isHost && totalPlayers === lobbyNumPlayers && allConnected;
   startGameButton.disabled = !ready;
@@ -318,12 +326,23 @@ function renderPlayers() {
 }
 
 function renderPlayerRow(player) {
-  const host = player.is_host ? " (host)" : "";
-  const cpu = player.is_cpu ? " (cpu)" : "";
   const connected = player.connected ? "connected" : "disconnected";
   const statusClass = player.connected ? "player-online" : "player-offline";
 
-  return `<div>${escapeHtml(player.name)} <span class="${statusClass}">(${connected})</span><span class="player-extra">${host}${cpu}</span></div>`;
+  const row = document.createElement("div");
+  row.append(document.createTextNode(`${player.name} `));
+
+  const status = document.createElement("span");
+  status.className = statusClass;
+  status.textContent = `(${connected})`;
+  row.append(status);
+
+  const extra = document.createElement("span");
+  extra.className = "player-extra";
+  extra.textContent = `${player.is_host ? " (host)" : ""}${player.is_cpu ? " (cpu)" : ""}`;
+  row.append(extra);
+
+  return row;
 }
 
 function renderIdentity() {
@@ -392,12 +411,6 @@ function coordKey(coord) {
 
 function sameCoord(a, b) {
   return Boolean(a && b && a[0] === b[0] && a[1] === b[1]);
-}
-
-function escapeHtml(value) {
-  return String(value).replace(/[&<>"]/g, (char) => {
-    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[char];
-  });
 }
 
 function randomPlayerId() {
